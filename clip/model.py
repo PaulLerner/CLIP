@@ -180,13 +180,58 @@ class ResidualAttentionBlock(nn.Module):
         self.ln_2 = LayerNorm(d_model)
         self.attn_mask = attn_mask
 
-    def attention(self, x: Tensor):
-        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
-        return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
-
     def forward(self, x: Tensor):
-        x = x + self.attention(self.ln_1(x))
+        x = self.ln_1(x)
+        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        x = x + self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
         x = x + self.mlp(self.ln_2(x))
+        return x
+
+
+class SingleheadTransformerDecoderLayer(nn.Module):
+    """Adapted from ResidualAttentionBlock and torch.nn.TransformerDecoderLayer
+    This should be more or less equivalent to torch.nn.TransformerDecoderLayer
+    but using SingleheadAttention for cross-attention instead of nn.MultiheadAttention
+
+    Note that n_head is only used for self-attention !
+    Cross-attention only has one head
+    """
+    def __init__(self, d_model: int, n_head: int, attn_mask: Tensor = None):
+        super().__init__()
+
+        # note we leave this ambiguous "attn" name to easily load weights
+        # from a pre-trained ResidualAttentionBlock
+        self.attn = nn.MultiheadAttention(d_model, n_head)
+        self.ln_1 = LayerNorm(d_model)
+        self.cross_attn = SingleheadAttention(d_model)
+        self.ln_2 = LayerNorm(d_model)
+        self.mlp = nn.Sequential(OrderedDict([
+            ("c_fc", nn.Linear(d_model, d_model * 4)),
+            ("gelu", QuickGELU()),
+            ("c_proj", nn.Linear(d_model * 4, d_model))
+        ]))
+        self.ln_3 = LayerNorm(d_model)
+        self.attn_mask = attn_mask
+
+    def forward(self, x: Tensor, memory: Tensor,
+                memory_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None):
+        r"""
+        Pass the inputs (and mask) through the decoder layer.
+
+        Args:
+            x: the sequence to the decoder layer (required).
+            memory: the sequence from the last layer of the encoder (required).
+            memory_mask: the mask for the memory sequence (optional).
+            memory_key_padding_mask: the mask for the memory keys per batch (optional).
+        """
+        x = self.ln_1(x)
+        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        x = x + self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
+        x = self.ln_2(x)
+        x = x + self.cross_attn(x, memory, memory, need_weights=False,
+                                attn_mask=memory_mask, key_padding_mask=memory_key_padding_mask)[0]
+        x = x + self.mlp(self.ln_3(x))
         return x
 
 
@@ -495,8 +540,8 @@ class SingleheadAttention(nn.Module):
             v_proj_weight=self.v_proj_weight)
 
 
-
 class Transformer(nn.Module):
+    """Note, in torch.nn this is more or less equivalent to TransformerEncoder"""
     def __init__(self, width: int, layers: int, heads: int, attn_mask: Tensor = None):
         super().__init__()
         self.width = width
@@ -505,6 +550,22 @@ class Transformer(nn.Module):
 
     def forward(self, x: Tensor):
         return self.resblocks(x)
+
+
+class TransformerDecoder(nn.Module):
+    """Adapted from Transformer and torch.nn.TransformerDecoder
+    This should be more or less equivalent to torch.nn.TransformerDecoder
+    but using SingleheadTransformerDecoderLayer instead of torch.nn.TransformerDecoderLayer
+    """
+    def __init__(self, width: int, layers: int, heads: int, attn_mask: Tensor = None):
+        super().__init__()
+        self.width = width
+        self.layers = layers
+        self.resblocks = nn.Sequential(*[SingleheadTransformerDecoderLayer(width, heads, attn_mask) for _ in range(layers)])
+
+    def forward(self, *args, **kwargs):
+        """Pass any argument to the SingleheadTransformerDecoderLayer"""
+        return self.resblocks(*args, **kwargs)
 
 
 class VisualTransformer(nn.Module):
@@ -544,7 +605,7 @@ class VisualTransformer(nn.Module):
         return x
 
 
-class CLIP(nn.Module):
+class BaseCLIP(nn.Module):
     def __init__(self,
                  embed_dim: int,
                  # vision
@@ -556,9 +617,8 @@ class CLIP(nn.Module):
                  context_length: int,
                  vocab_size: int,
                  transformer_width: int,
-                 transformer_heads: int,
-                 transformer_layers: int
                  ):
+        """Beware this doesn't call initialize_parameters, you should call it in the child class !"""
         super().__init__()
 
         self.context_length = context_length
@@ -583,22 +643,9 @@ class CLIP(nn.Module):
                 output_dim=embed_dim
             )
 
-        self.transformer = Transformer(
-            width=transformer_width,
-            layers=transformer_layers,
-            heads=transformer_heads,
-            attn_mask=self.build_attention_mask()
-        )
-
         self.vocab_size = vocab_size
         self.token_embedding = nn.Embedding(vocab_size, transformer_width)
         self.positional_embedding = nn.Parameter(torch.empty(self.context_length, transformer_width))
-        self.ln_final = LayerNorm(transformer_width)
-
-        self.text_projection = nn.Parameter(torch.empty(transformer_width, embed_dim))
-        self.logit_scale = nn.Parameter(torch.ones([]))
-
-        self.initialize_parameters()
 
     def initialize_parameters(self):
         nn.init.normal_(self.token_embedding.weight, std=0.02)
@@ -641,6 +688,37 @@ class CLIP(nn.Module):
     def dtype(self):
         return self.visual.conv1.weight.dtype
 
+
+class CLIP(BaseCLIP):
+    def __init__(self,
+                 embed_dim: int,
+                 # vision
+                 image_resolution: int,
+                 vision_layers: Union[Tuple[int, int, int, int], int],
+                 vision_width: int,
+                 vision_patch_size: int,
+                 # text
+                 context_length: int,
+                 vocab_size: int,
+                 transformer_width: int,
+                 transformer_heads: int,
+                 transformer_layers: int
+                 ):
+        super().__init__(embed_dim, image_resolution, vision_layers, vision_width,
+                         vision_patch_size, context_length, vocab_size, transformer_width)
+        self.transformer = Transformer(
+            width=transformer_width,
+            layers=transformer_layers,
+            heads=transformer_heads,
+            attn_mask=self.build_attention_mask()
+        )
+
+        self.ln_final = LayerNorm(transformer_width)
+
+        self.text_projection = nn.Parameter(torch.empty(transformer_width, embed_dim))
+        self.logit_scale = nn.Parameter(torch.ones([]))
+        self.initialize_parameters()
+
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))
 
@@ -674,6 +752,63 @@ class CLIP(nn.Module):
 
         # shape = [global_batch_size, global_batch_size]
         return logits_per_image, logits_per_text
+
+
+class CLIPDecoder(BaseCLIP):
+    """Same as CLIP but uses a Transformer Decoder for the text instead of an 'Encoder'
+    i.e. adds cross attention between the text Transformer and the vision Transformer
+    Also adds a final classification layer to predict the next token in the text"""
+    def __init__(self,
+                 embed_dim: int,
+                 # vision
+                 image_resolution: int,
+                 vision_layers: Union[Tuple[int, int, int, int], int],
+                 vision_width: int,
+                 vision_patch_size: int,
+                 # text
+                 context_length: int,
+                 vocab_size: int,
+                 transformer_width: int,
+                 transformer_heads: int,
+                 transformer_layers: int
+                 ):
+        if isinstance(vision_layers, (tuple, list)):
+            raise NotImplementedError("Cannot use ModifiedResNet for now as it's unclear where is the multimodal projection matrix, see #51.\n"
+                                      "Please use VisualTransformer instead")
+        super().__init__(embed_dim, image_resolution, vision_layers, vision_width,
+                         vision_patch_size, context_length, vocab_size, transformer_width)
+        self.transformer = TransformerDecoder(
+            width=transformer_width,
+            layers=transformer_layers,
+            heads=transformer_heads,
+            attn_mask=self.build_attention_mask()
+        )
+        self.linear = nn.Linear(embed_dim, vocab_size)
+        self.log_softmax = nn.LogSoftmax(-1)
+        self.initialize_parameters()
+
+    def encode_image(self, image):
+        raise NotImplementedError()
+        return self.visual(image.type(self.dtype))
+
+    def forward(self, image, text):
+        # encode image with visual encoder
+        image_features = self.encode_image(image)
+
+        # embed text
+        x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
+        x = x + self.positional_embedding.type(self.dtype)
+
+        # fix shape and pass through the multimodal transformer
+        x = x.permute(1, 0, 2)  # NLD -> LND
+        image_features = image_features.permute(1, 0, 2)
+        x = self.transformer(x, image_features,
+                             memory_mask=None, memory_key_padding_mask=None)
+        x = x.permute(1, 0, 2)  # LND -> NLD
+
+        # predict the next token
+        x = self.linear(x)
+        return self.log_softmax(x)
 
 
 def convert_weights(model: nn.Module):
