@@ -568,7 +568,7 @@ class TransformerDecoder(nn.Module):
         return self.resblocks(*args, **kwargs)
 
 
-class VisualTransformer(nn.Module):
+class BaseVisualTransformer(nn.Module):
     def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
         super().__init__()
         self.input_resolution = input_resolution
@@ -582,10 +582,9 @@ class VisualTransformer(nn.Module):
 
         self.transformer = Transformer(width, layers, heads)
 
-        self.ln_post = LayerNorm(width)
-        self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
-
-    def forward(self, x: Tensor):
+    def base_forward(self, x: Tensor):
+        """Runs through the Transformer but doesn't project in the multimodal space
+        Also keeps all of the tokens' hidden states instead of keeping only the class_embedding"""
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
@@ -597,6 +596,23 @@ class VisualTransformer(nn.Module):
         x = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
 
+        return x
+
+    def forward(self, x: Tensor):
+        return self.base_forward(x)
+
+
+class VisualTransformer(BaseVisualTransformer):
+    def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
+        super().__init__(input_resolution, patch_size, width, layers, heads, output_dim)
+
+        scale = width ** -0.5
+        self.ln_post = LayerNorm(width)
+        self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
+
+    def forward(self, x: Tensor):
+        """Keeps only class embedding as final representation and project it in the multimodal space"""
+        x = self.base_forward(x)
         x = self.ln_post(x[:, 0, :])
 
         if self.proj is not None:
@@ -607,13 +623,6 @@ class VisualTransformer(nn.Module):
 
 class BaseCLIP(nn.Module):
     def __init__(self,
-                 embed_dim: int,
-                 # vision
-                 image_resolution: int,
-                 vision_layers: Union[Tuple[int, int, int, int], int],
-                 vision_width: int,
-                 vision_patch_size: int,
-                 # text
                  context_length: int,
                  vocab_size: int,
                  transformer_width: int,
@@ -622,27 +631,6 @@ class BaseCLIP(nn.Module):
         super().__init__()
 
         self.context_length = context_length
-
-        if isinstance(vision_layers, (tuple, list)):
-            vision_heads = vision_width * 32 // 64
-            self.visual = ModifiedResNet(
-                layers=vision_layers,
-                output_dim=embed_dim,
-                heads=vision_heads,
-                input_resolution=image_resolution,
-                width=vision_width
-            )
-        else:
-            vision_heads = vision_width // 64
-            self.visual = VisualTransformer(
-                input_resolution=image_resolution,
-                patch_size=vision_patch_size,
-                width=vision_width,
-                layers=vision_layers,
-                heads=vision_heads,
-                output_dim=embed_dim
-            )
-
         self.vocab_size = vocab_size
         self.token_embedding = nn.Embedding(vocab_size, transformer_width)
         self.positional_embedding = nn.Parameter(torch.empty(self.context_length, transformer_width))
@@ -704,8 +692,27 @@ class CLIP(BaseCLIP):
                  transformer_heads: int,
                  transformer_layers: int
                  ):
-        super().__init__(embed_dim, image_resolution, vision_layers, vision_width,
-                         vision_patch_size, context_length, vocab_size, transformer_width)
+        super().__init__(context_length, vocab_size, transformer_width)
+        if isinstance(vision_layers, (tuple, list)):
+            vision_heads = vision_width * 32 // 64
+            self.visual = ModifiedResNet(
+                layers=vision_layers,
+                output_dim=embed_dim,
+                heads=vision_heads,
+                input_resolution=image_resolution,
+                width=vision_width
+            )
+        else:
+            vision_heads = vision_width // 64
+            self.visual = VisualTransformer(
+                input_resolution=image_resolution,
+                patch_size=vision_patch_size,
+                width=vision_width,
+                layers=vision_layers,
+                heads=vision_heads,
+                output_dim=embed_dim
+            )
+
         self.transformer = Transformer(
             width=transformer_width,
             layers=transformer_layers,
@@ -772,11 +779,20 @@ class CLIPDecoder(BaseCLIP):
                  transformer_heads: int,
                  transformer_layers: int
                  ):
+        super().__init__(context_length, vocab_size, transformer_width)
         if isinstance(vision_layers, (tuple, list)):
             raise NotImplementedError("Cannot use ModifiedResNet for now as it's unclear where is the multimodal projection matrix, see #51.\n"
                                       "Please use VisualTransformer instead")
-        super().__init__(embed_dim, image_resolution, vision_layers, vision_width,
-                         vision_patch_size, context_length, vocab_size, transformer_width)
+        else:
+            vision_heads = vision_width // 64
+            self.visual = BaseVisualTransformer(
+                input_resolution=image_resolution,
+                patch_size=vision_patch_size,
+                width=vision_width,
+                layers=vision_layers,
+                heads=vision_heads,
+                output_dim=embed_dim
+            )
         self.transformer = TransformerDecoder(
             width=transformer_width,
             layers=transformer_layers,
@@ -788,7 +804,6 @@ class CLIPDecoder(BaseCLIP):
         self.initialize_parameters()
 
     def encode_image(self, image):
-        raise NotImplementedError()
         return self.visual(image.type(self.dtype))
 
     def forward(self, image, text):
