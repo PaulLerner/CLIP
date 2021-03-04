@@ -196,14 +196,23 @@ class SingleheadTransformerDecoderLayer(nn.Module):
     Note that n_head is only used for self-attention !
     Cross-attention only has one head
     """
-    def __init__(self, d_model: int, n_head: int, attn_mask: Tensor = None):
+    def __init__(self, d_model: int, n_head: int, attn_mask: Tensor = None,
+                 dropout: float = 0., bias: bool = True, add_bias_kv: bool = False,
+                 add_zero_attn: bool = False, kdim: int = None, vdim: int = None):
         super().__init__()
 
         # note we leave this ambiguous "attn" name to easily load weights
         # from a pre-trained ResidualAttentionBlock
-        self.attn = nn.MultiheadAttention(d_model, n_head)
+        self.attn = nn.MultiheadAttention(d_model, n_head, dropout=dropout,
+                                          bias=bias, add_bias_kv=add_bias_kv,
+                                          add_zero_attn=add_zero_attn,
+                                          kdim=kdim, vdim=vdim)
         self.ln_1 = LayerNorm(d_model)
-        self.cross_attn = SingleheadAttention(d_model)
+
+        self.cross_attn = SingleheadAttention(d_model, dropout=dropout,
+                                              bias=bias, add_bias_kv=add_bias_kv,
+                                              add_zero_attn=add_zero_attn,
+                                              kdim=kdim, vdim=vdim)
         self.ln_2 = LayerNorm(d_model)
         self.mlp = nn.Sequential(OrderedDict([
             ("c_fc", nn.Linear(d_model, d_model * 4)),
@@ -442,23 +451,24 @@ def single_head_attention_forward(query: Tensor,
 
 class SingleheadAttention(nn.Module):
     """Adapted from torch.nn.MultiheadAttention
-    We assume that kdim == vdim == embed_dim which allows to remove the final projection layer (torch.nn.MultiheadAttention.out_proj)
-    Note however that we use different q_proj_weight, k_proj_weight and v_proj_weight
-    Unlike in torch.nn.MultiheadAttention where a single in_proj_weight is used when kdim == vdim == embed_dim
+    We assume that head_dim == embed_dim which allows to remove the final projection layer (torch.nn.MultiheadAttention.out_proj)
 
     This restricts the use of a single attention head
     """
 
-    def __init__(self, embed_dim, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False):
+    def __init__(self, embed_dim, dropout=0., bias=True, add_bias_kv=False,
+                 add_zero_attn=False, kdim=None, vdim=None):
         super(SingleheadAttention, self).__init__()
         self.embed_dim = embed_dim
+        self.kdim = kdim if kdim is not None else embed_dim
+        self.vdim = vdim if vdim is not None else embed_dim
 
         self.dropout = dropout
         self.head_dim = embed_dim
 
         self.q_proj_weight = nn.Parameter(Tensor(embed_dim, embed_dim))
-        self.k_proj_weight = nn.Parameter(Tensor(embed_dim, embed_dim))
-        self.v_proj_weight = nn.Parameter(Tensor(embed_dim, embed_dim))
+        self.k_proj_weight = nn.Parameter(Tensor(embed_dim, self.kdim))
+        self.v_proj_weight = nn.Parameter(Tensor(embed_dim, self.vdim))
         self.register_parameter('in_proj_weight', None)
 
         if bias:
@@ -556,12 +566,14 @@ class TransformerDecoder(nn.Module):
     """Adapted from Transformer and torch.nn.TransformerDecoder
     This should be more or less equivalent to torch.nn.TransformerDecoder
     but using SingleheadTransformerDecoderLayer instead of torch.nn.TransformerDecoderLayer
+
+    Additional arguments are passed to SingleheadTransformerDecoderLayer
     """
-    def __init__(self, width: int, layers: int, heads: int, attn_mask: Tensor = None):
+    def __init__(self, width: int, layers: int, heads: int, attn_mask: Tensor = None, **kwargs):
         super().__init__()
         self.width = width
         self.layers = layers
-        self.resblocks = nn.ModuleList([SingleheadTransformerDecoderLayer(width, heads, attn_mask) for _ in range(layers)])
+        self.resblocks = nn.ModuleList([SingleheadTransformerDecoderLayer(width, heads, attn_mask, **kwargs) for _ in range(layers)])
 
     def forward(self, x: Tensor, memory: Tensor,
                 memory_mask: Optional[Tensor] = None,
@@ -573,10 +585,10 @@ class TransformerDecoder(nn.Module):
 
 
 class BaseVisualTransformer(nn.Module):
-    def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
+    def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int):
         super().__init__()
         self.input_resolution = input_resolution
-        self.output_dim = output_dim
+        self.width = width
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
 
         scale = width ** -0.5
@@ -608,8 +620,9 @@ class BaseVisualTransformer(nn.Module):
 
 class VisualTransformer(BaseVisualTransformer):
     def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
-        super().__init__(input_resolution, patch_size, width, layers, heads, output_dim)
+        super().__init__(input_resolution, patch_size, width, layers, heads)
 
+        self.output_dim = output_dim
         scale = width ** -0.5
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
@@ -780,22 +793,25 @@ class CLIPDecoder(BaseCLIP):
     """
     def __init__(self,
                  embed_dim: int,
-                 # vision
+                 # vision encoder
                  image_resolution: int,
                  vision_layers: Union[Tuple[int, int, int, int], int],
                  vision_width: int,
                  vision_patch_size: int,
-                 # text
+                 # multimodal decoder
                  context_length: int,
                  vocab_size: int,
                  transformer_width: int,
                  transformer_heads: int,
-                 transformer_layers: int
+                 transformer_layers: int,
+                 decoder_dropout: float = 0.,
+                 bias: bool = True,
+                 add_bias_kv: bool = False,
+                 add_zero_attn: bool = False
                  ):
         super().__init__(context_length, vocab_size, transformer_width)
         if isinstance(vision_layers, (tuple, list)):
-            raise NotImplementedError("Cannot use ModifiedResNet for now as it's unclear where is the multimodal projection matrix, see #51.\n"
-                                      "Please use VisualTransformer instead")
+            raise NotImplementedError("Cannot use ModifiedResNet for now, please use VisualTransformer instead")
         else:
             vision_heads = vision_width // 64
             self.visual = BaseVisualTransformer(
@@ -803,14 +819,19 @@ class CLIPDecoder(BaseCLIP):
                 patch_size=vision_patch_size,
                 width=vision_width,
                 layers=vision_layers,
-                heads=vision_heads,
-                output_dim=embed_dim
+                heads=vision_heads
             )
         self.transformer = TransformerDecoder(
             width=transformer_width,
             layers=transformer_layers,
             heads=transformer_heads,
-            attn_mask=self.build_attention_mask()
+            attn_mask=self.build_attention_mask(),
+            dropout=decoder_dropout,
+            bias=bias,
+            add_bias_kv=add_bias_kv,
+            add_zero_attn=add_zero_attn,
+            kdim=vision_width,
+            vdim=vision_width
         )
         self.linear = nn.Linear(embed_dim, vocab_size)
         self.log_softmax = nn.LogSoftmax(-1)
