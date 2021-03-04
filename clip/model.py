@@ -215,13 +215,14 @@ class SingleheadTransformerDecoderLayer(nn.Module):
                                               bias=bias, add_bias_kv=add_bias_kv,
                                               add_zero_attn=add_zero_attn,
                                               kdim=kdim, vdim=vdim)
-        self.ln_2 = LayerNorm(d_model)
+        # likewise here we leave ln_2 for the pre-mlp normalization
+        self.ln_cross_attn = LayerNorm(d_model)
         self.mlp = nn.Sequential(OrderedDict([
             ("c_fc", nn.Linear(d_model, d_model * 4)),
             ("gelu", QuickGELU()),
             ("c_proj", nn.Linear(d_model * 4, d_model))
         ]))
-        self.ln_3 = LayerNorm(d_model)
+        self.ln_2 = LayerNorm(d_model)
         self.attn_mask = attn_mask
 
     def forward(self, x: Tensor, memory: Tensor,
@@ -239,10 +240,10 @@ class SingleheadTransformerDecoderLayer(nn.Module):
         x = self.ln_1(x)
         self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
         x = x + self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
-        x = self.ln_2(x)
+        x = self.ln_cross_attn(x)
         x = x + self.cross_attn(x, memory, memory, need_weights=False,
                                 attn_mask=memory_mask, key_padding_mask=memory_key_padding_mask)[0]
-        x = x + self.mlp(self.ln_3(x))
+        x = x + self.mlp(self.ln_2(x))
         return x
 
 
@@ -886,7 +887,7 @@ def convert_weights(model: nn.Module):
     model.apply(_convert_weights_to_fp16)
 
 
-def build_model(state_dict: dict):
+def build_model(state_dict: dict, training=False, Class=CLIP):
     vit = "visual.proj" in state_dict
 
     if vit:
@@ -911,7 +912,7 @@ def build_model(state_dict: dict):
     transformer_heads = transformer_width // 64
     transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith(f"transformer.resblocks")))
 
-    model = CLIP(
+    model = Class(
         embed_dim,
         image_resolution, vision_layers, vision_width, vision_patch_size,
         context_length, vocab_size, transformer_width, transformer_heads, transformer_layers
@@ -921,6 +922,36 @@ def build_model(state_dict: dict):
         if key in state_dict:
             del state_dict[key]
 
+    # map pre-trained weights to CLIPDecoder
+    if isinstance(model, CLIPDecoder):
+        # embedding matrix to classification layer
+        state_dict["linear.weight"] = state_dict["token_embedding.weight"]
+
+        text_projection = state_dict.pop("text_projection")
+        visual_projection = state_dict.pop("visual.proj")
+        ln_final_bias = state_dict.pop('ln_final.bias')
+        ln_final_weight = state_dict.pop('ln_final.weight')
+        for i in range(transformer_layers):
+            # visual multimodal projection to cross-attention projection
+            state_dict[f"transformer.resblocks.{i}.cross_attn.k_proj_weight"] = visual_projection
+            state_dict[f"transformer.resblocks.{i}.cross_attn.v_proj_weight"] = visual_projection
+
+            # text multimodal projection to cross-attention projection
+            state_dict[f"transformer.resblocks.{i}.cross_attn.q_proj_weight"] = text_projection
+
+            # don't forget the layer normalization
+            state_dict[f"transformer.resblocks.{i}.ln_cross_attn.bias"] = ln_final_bias
+            state_dict[f"transformer.resblocks.{i}.ln_cross_attn.bias"] = ln_final_weight
+
+
     convert_weights(model)
-    model.load_state_dict(state_dict)
-    return model.eval()
+    loading_output = model.load_state_dict(state_dict, strict=not isinstance(model, CLIPDecoder))
+    # irrelevant pre-trained weights
+    throw_away = {'logit_scale', 'visual.ln_post.bias', 'visual.ln_post.weight'}
+    unexpected_keys = set(loading_output.unexpected_keys) - throw_away
+    if unexpected_keys:
+        raise RuntimeError(f"Unexpected keys in state_dict:\n{unexpected_keys}")
+    if loading_output.missing_keys:
+        print(f"The following keys were not loaded from state_dict:\n{loading_output.missing_keys}")
+
+    return model.train(training)
