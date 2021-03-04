@@ -195,6 +195,9 @@ class SingleheadTransformerDecoderLayer(nn.Module):
 
     Note that n_head is only used for self-attention !
     Cross-attention only has one head
+
+    Also kdim and vdim are only passed to cross-attention,
+    input to self-attention have the same dimension by definition
     """
     def __init__(self, d_model: int, n_head: int, attn_mask: Tensor = None,
                  dropout: float = 0., bias: bool = True, add_bias_kv: bool = False,
@@ -205,8 +208,7 @@ class SingleheadTransformerDecoderLayer(nn.Module):
         # from a pre-trained ResidualAttentionBlock
         self.attn = nn.MultiheadAttention(d_model, n_head, dropout=dropout,
                                           bias=bias, add_bias_kv=add_bias_kv,
-                                          add_zero_attn=add_zero_attn,
-                                          kdim=kdim, vdim=vdim)
+                                          add_zero_attn=add_zero_attn)
         self.ln_1 = LayerNorm(d_model)
 
         self.cross_attn = SingleheadAttention(d_model, dropout=dropout,
