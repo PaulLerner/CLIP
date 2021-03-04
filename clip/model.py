@@ -635,7 +635,8 @@ class BaseCLIP(nn.Module):
         self.token_embedding = nn.Embedding(vocab_size, transformer_width)
         self.positional_embedding = nn.Parameter(torch.empty(self.context_length, transformer_width))
 
-    def initialize_parameters(self):
+    def base_initialize_parameters(self):
+        """Note that (Base)VisualTransformer parameters are initialized in its constructor"""
         nn.init.normal_(self.token_embedding.weight, std=0.02)
         nn.init.normal_(self.positional_embedding, std=0.01)
 
@@ -661,8 +662,8 @@ class BaseCLIP(nn.Module):
             nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
             nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
 
-        if self.text_projection is not None:
-            nn.init.normal_(self.text_projection, std=self.transformer.width ** -0.5)
+    def initialize_parameters(self):
+        self.base_initialize_parameters()
 
     def build_attention_mask(self):
         # lazily create causal attention mask, with full attention between the vision tokens
@@ -726,6 +727,11 @@ class CLIP(BaseCLIP):
         self.logit_scale = nn.Parameter(torch.ones([]))
         self.initialize_parameters()
 
+    def initialize_parameters(self):
+        self.base_initialize_parameters()
+        if self.text_projection is not None:
+            nn.init.normal_(self.text_projection, std=self.transformer.width ** -0.5)
+
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))
 
@@ -764,7 +770,10 @@ class CLIP(BaseCLIP):
 class CLIPDecoder(BaseCLIP):
     """Same as CLIP but uses a Transformer Decoder for the text instead of an 'Encoder'
     i.e. adds cross attention between the text Transformer and the vision Transformer
-    Also adds a final classification layer to predict the next token in the text"""
+    Also adds a final classification layer to predict the next token in the text
+
+    Note that TransformerDecoder cross-attention parameters are initialized in SingleheadAttention
+    """
     def __init__(self,
                  embed_dim: int,
                  # vision
