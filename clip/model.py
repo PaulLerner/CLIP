@@ -924,6 +924,10 @@ def build_model(state_dict: dict, training=False, Class=CLIP):
 
     # map pre-trained weights to CLIPDecoder
     if isinstance(model, CLIPDecoder):
+        # remove irrelevant pre-trained weights
+        for weight in ['logit_scale', 'visual.ln_post.bias', 'visual.ln_post.weight']:
+            state_dict.pop(weight, None)
+
         # embedding matrix to classification layer
         state_dict["linear.weight"] = state_dict["token_embedding.weight"]
 
@@ -946,11 +950,8 @@ def build_model(state_dict: dict, training=False, Class=CLIP):
 
     convert_weights(model)
     loading_output = model.load_state_dict(state_dict, strict=not isinstance(model, CLIPDecoder))
-    # irrelevant pre-trained weights
-    throw_away = {'logit_scale', 'visual.ln_post.bias', 'visual.ln_post.weight'}
-    unexpected_keys = set(loading_output.unexpected_keys) - throw_away
-    if unexpected_keys:
-        raise RuntimeError(f"Unexpected keys in state_dict:\n{unexpected_keys}")
+    if loading_output.unexpected_keys:
+        raise RuntimeError(f"Unexpected keys in state_dict:\n{loading_output.unexpected_keys}")
     if loading_output.missing_keys:
         print(f"The following keys were not loaded from state_dict:\n{loading_output.missing_keys}")
 
