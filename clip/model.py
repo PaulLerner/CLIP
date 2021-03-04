@@ -931,8 +931,9 @@ def build_model(state_dict: dict, training=False, Class=CLIP):
         # embedding matrix to classification layer
         state_dict["linear.weight"] = state_dict["token_embedding.weight"]
 
-        text_projection = state_dict.pop("text_projection")
-        visual_projection = state_dict.pop("visual.proj")
+        # attention in torch uses F.linear so we have to transpose the projection matrices
+        text_projection = state_dict.pop("text_projection").T
+        visual_projection = state_dict.pop("visual.proj").T
         ln_final_bias = state_dict.pop('ln_final.bias')
         ln_final_weight = state_dict.pop('ln_final.weight')
         for i in range(transformer_layers):
@@ -945,7 +946,7 @@ def build_model(state_dict: dict, training=False, Class=CLIP):
 
             # don't forget the layer normalization
             state_dict[f"transformer.resblocks.{i}.ln_cross_attn.bias"] = ln_final_bias
-            state_dict[f"transformer.resblocks.{i}.ln_cross_attn.bias"] = ln_final_weight
+            state_dict[f"transformer.resblocks.{i}.ln_cross_attn.weight"] = ln_final_weight
 
 
     convert_weights(model)
