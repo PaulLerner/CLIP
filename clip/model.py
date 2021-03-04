@@ -561,11 +561,15 @@ class TransformerDecoder(nn.Module):
         super().__init__()
         self.width = width
         self.layers = layers
-        self.resblocks = nn.Sequential(*[SingleheadTransformerDecoderLayer(width, heads, attn_mask) for _ in range(layers)])
+        self.resblocks = nn.ModuleList([SingleheadTransformerDecoderLayer(width, heads, attn_mask) for _ in range(layers)])
 
-    def forward(self, *args, **kwargs):
-        """Pass any argument to the SingleheadTransformerDecoderLayer"""
-        return self.resblocks(*args, **kwargs)
+    def forward(self, x: Tensor, memory: Tensor,
+                memory_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None):
+        """See SingleheadTransformerDecoderLayer"""
+        for mod in self.resblocks:
+            x = mod(x, memory, memory_mask=memory_mask, memory_key_padding_mask=memory_key_padding_mask)
+        return x
 
 
 class BaseVisualTransformer(nn.Module):
