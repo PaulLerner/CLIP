@@ -9,7 +9,7 @@ from PIL import Image
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
 from tqdm import tqdm
 
-from .model import build_model
+from .model import build_model, CLIP
 from .simple_tokenizer import SimpleTokenizer as _Tokenizer
 
 __all__ = ["available_models", "load", "tokenize"]
@@ -68,7 +68,8 @@ def available_models() -> List[str]:
     return list(_MODELS.keys())
 
 
-def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu", jit=True):
+def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
+         jit=True, training=False, Class=CLIP):
     """Load a CLIP model
 
     Parameters
@@ -81,6 +82,12 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
 
     jit : bool
         Whether to load the optimized JIT model (default) or more hackable non-JIT model.
+
+    training : bool
+        Whether to return the model in training or eval mode. Defaults to eval
+
+    Class : type
+        Class of the model. Defaults to CLIP.
 
     Returns
     -------
@@ -99,7 +106,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
 
     try:
         # loading JIT archive
-        model = torch.jit.load(model_path, map_location=device if jit else "cpu").eval()
+        model = torch.jit.load(model_path, map_location=device if jit else "cpu").train(training)
         state_dict = None
     except RuntimeError:
         # loading saved state dict
@@ -109,10 +116,12 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
         state_dict = torch.load(model_path, map_location="cpu")
 
     if not jit:
-        model = build_model(state_dict or model.state_dict()).to(device)
+        model = build_model(state_dict or model.state_dict(), training=training, Class=Class).to(device)
         if str(device) == "cpu":
             model.float()
         return model, _transform(model.visual.input_resolution)
+    elif Class != CLIP:
+        raise NotImplementedError(f"Set 'jit=False' for other models than CLIP (got {Class})")
 
     # patch the device names
     device_holder = torch.jit.trace(lambda: torch.ones([]).to(torch.device(device)), example_inputs=[])
