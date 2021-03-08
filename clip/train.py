@@ -8,7 +8,7 @@ from transformers import Trainer, TrainingArguments, EvalPrediction
 from torch import nn
 
 from .clip import load
-from .model import CLIPDecoder
+import clip.model
 from .data import get_datasets
 
 
@@ -78,20 +78,23 @@ if __name__ == "__main__":
     with open(config_path, "r") as file:
         config = json.load(file)
 
-    # data
-    train_dataset, eval_dataset = get_datasets(**config.get("dataset", {}))
-
     # model
-    model_args = dict(name="ViT-B/32", jit=False, training=True, Class=CLIPDecoder)
+    model_args = dict(name="ViT-B/32", jit=False, training=True, Class="CLIPDecoder")
     model_args.update(config.get("model", {}))
-    model = load(**model_args)
+    model_args["Class"] = getattr(clip.model, model_args["Class"])
+    model, image_preprocess = load(**model_args)
+
+    # data
+    train_dataset, eval_dataset = get_datasets(image_preprocess=image_preprocess, **config.get("dataset", {}))
 
     # training
-    criterion = nn.NLLLoss(**config.get("criterion", {}))
+    criterion_args = config.get("criterion", {})
+    # get criterion class (e.g. nn.NLLLoss) by name
+    CriterionClass = getattr(nn, criterion_args.pop("Class", "NLLLoss"))
+    criterion = CriterionClass(**criterion_args)
     learner = LanguageModel(model, criterion)
     training_args = TrainingArguments(**config.get("training", {}))
     trainer = Trainer(model=learner, args=training_args,
                       train_dataset=train_dataset, eval_dataset=eval_dataset,
                       compute_metrics=compute_metrics)
     trainer.train(**config.get("checkpoint", {}))
-    trainer.evaluate()

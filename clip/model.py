@@ -843,7 +843,22 @@ class CLIPDecoder(BaseCLIP):
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))
 
-    def forward(self, image, text):
+    def forward(self, text, image):
+        """
+        Parameters
+        ----------
+        text: Tensor
+            (batch_size, context_length, embed_dim)
+            Beware this is the first argument unlike in CLIP and BaseCLIP
+        image: Tensor
+            (batch_size, in_channels, height, width)
+            Beware this is the second argument unlike in CLIP and BaseCLIP
+
+        Returns
+        -------
+        x: Tensor
+            (batch_size, context_length, embed_dim)
+        """
         # encode image with visual encoder
         image_features = self.encode_image(image)
 
