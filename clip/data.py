@@ -2,6 +2,7 @@ import json
 from PIL import Image
 from collections import Counter
 from torch.utils.data import Dataset
+import random
 
 from clip import tokenize
 
@@ -19,7 +20,8 @@ class VQADataset(Dataset):
         return len(self.data)
 
 
-def get_dataset(image_preprocess, subset, images_path, questions_path, annotations_path=None, gt_threshold=3):
+def get_dataset(image_preprocess, subset, images_path, questions_path, annotations_path=None,
+                gt_threshold=3, data_ratio=1.0):
     """
 
     Parameters
@@ -38,11 +40,15 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
         number of annotators required to consider that the most common answer is ground-truth
         The QA pair will be discarded
         Defaults to 3.
+    data_ratio : float, optional
+        keep only this ratio of data in the dataset
+        Defaults to keep all of the dataset.
 
     Returns
     -------
     dataset: VQADataset
     """
+    assert 0. < data_ratio <= 1.0, f"data_ratio is expected to be in ]0, 1], got {data_ratio}"
     # load annotation and question JSON files
     with open(questions_path, 'r') as file:
         questions = json.load(file)
@@ -58,7 +64,10 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
 
     # zip question and answers, preprocess text and image
     data = []
+    random.seed(0)
     for qa in qas:
+        if random.random() > data_ratio:
+            continue
         if annotations is not None:
             question, annotation = qa
             assert question['question_id'] == annotation['question_id']
