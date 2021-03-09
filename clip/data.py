@@ -1,8 +1,10 @@
+from pathlib import Path
 import json
 from PIL import Image
 from collections import Counter
 from torch.utils.data import Dataset
 import random
+from tqdm import tqdm
 
 from clip import tokenize
 
@@ -49,11 +51,14 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
     dataset: VQADataset
     """
     assert 0. < data_ratio <= 1.0, f"data_ratio is expected to be in ]0, 1], got {data_ratio}"
+    images_path = Path(images_path).expanduser().resolve()
+    questions_path = Path(questions_path).expanduser().resolve()
     # load annotation and question JSON files
     with open(questions_path, 'r') as file:
         questions = json.load(file)
 
     if annotations_path is not None:
+        annotations_path = Path(annotations_path).expanduser().resolve()
         with open(annotations_path, 'r') as file:
             annotations = json.load(file)
         assert len(questions['questions']) == len(annotations['annotations'])
@@ -65,7 +70,7 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
     # zip question and answers, preprocess text and image
     data = []
     random.seed(0)
-    for qa in qas:
+    for qa in tqdm(qas, desc=f"Loading {data_ratio*100:.2f}% of {subset}"):
         if random.random() > data_ratio:
             continue
         if annotations is not None:
@@ -92,6 +97,7 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
         data.append(dict(inp=text, tgt=text, image=image))
 
     dataset = VQADataset(data)
+    print(f"Done! Total dataset size: {len(dataset)}")
     return dataset
 
 
@@ -105,11 +111,11 @@ def get_datasets(**kwargs):
         Defaults to None if "train_paths" (resp. "eval_paths") is not in kwargs
     """
     train_paths = kwargs.pop("train_paths", None)
+    eval_paths = kwargs.pop("eval_paths", None)
     if train_paths is not None:
         train_dataset = get_dataset(**train_paths, **kwargs)
     else:
         train_dataset = None
-    eval_paths = kwargs.pop("eval_paths", None)
     if eval_paths is not None:
         eval_dataset = get_dataset(**eval_paths, **kwargs)
     else:

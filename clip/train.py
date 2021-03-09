@@ -71,7 +71,7 @@ def compute_metrics(prediction):
     return {}
 
 
-if __name__ == "__main__":
+def main():
     # load and parse arguments
     args = docopt(__doc__)
     config_path = Path(args['<config>'])
@@ -79,6 +79,7 @@ if __name__ == "__main__":
         config = json.load(file)
 
     # model
+    print("loading model...")
     model_args = dict(name="ViT-B/32", jit=False, training=True, Class="CLIPDecoder")
     model_args.update(config.get("model", {}))
     model_args["Class"] = getattr(clip.model, model_args["Class"])
@@ -98,3 +99,7 @@ if __name__ == "__main__":
                       train_dataset=train_dataset, eval_dataset=eval_dataset,
                       compute_metrics=compute_metrics)
     trainer.train(**config.get("checkpoint", {}))
+
+
+if __name__ == "__main__":
+    main()
