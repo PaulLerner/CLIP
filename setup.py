@@ -16,6 +16,11 @@ setup(
             open(os.path.join(os.path.dirname(__file__), "requirements.txt"))
         )
     ],
+    entry_points={
+        "console_scripts": [
+            "clip-train=clip.train:main"
+        ]
+    },
     include_package_data=True,
     extras_require={'dev': ['pytest']},
 )
