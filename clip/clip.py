@@ -172,7 +172,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     return model, _transform(model.input_resolution.item())
 
 
-def tokenize(texts: Union[str, List[str]], context_length: int = 77) -> torch.LongTensor:
+def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt: bool = False) -> torch.LongTensor:
     """
     Returns the tokenized representation of given input string(s)
 
@@ -181,12 +181,20 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77) -> torch.Lo
     texts : Union[str, List[str]]
         An input string or a list of input strings to tokenize
 
-    context_length : int
+    context_length : int, optional
         The context length to use; all CLIP models use 77 as the context length
+
+    return_tgt : bool, optional
+        If True, will also return tgt, see below
 
     Returns
     -------
-    A two-dimensional tensor containing the resulting tokens, shape = [number of input strings, context_length]
+    inp : Tensor
+        A two-dimensional tensor containing the resulting tokens,
+        shape = [number of input strings, context_length]
+    tgt : Tensor, optional
+        Same as inp but padded with -100 instead of 0
+        These will be ignored by NLLLoss in training
     """
     if isinstance(texts, str):
         texts = [texts]
@@ -194,11 +202,18 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77) -> torch.Lo
     sot_token = _tokenizer.encoder["<|startoftext|>"]
     eot_token = _tokenizer.encoder["<|endoftext|>"]
     all_tokens = [[sot_token] + _tokenizer.encode(text) + [eot_token] for text in texts]
-    result = torch.zeros(len(all_tokens), context_length, dtype=torch.long)
+    inp = torch.zeros(len(all_tokens), context_length, dtype=torch.long)
+    if return_tgt:
+        tgt = torch.full_like(inp, -100)
 
     for i, tokens in enumerate(all_tokens):
         if len(tokens) > context_length:
             raise RuntimeError(f"Input {texts[i]} is too long for context length {context_length}")
-        result[i, :len(tokens)] = torch.tensor(tokens)
+        tokens_tensor = torch.tensor(tokens)
+        inp[i, :len(tokens)] = tokens_tensor
+        if return_tgt:
+            tgt[i, :len(tokens)] = tokens_tensor
 
-    return result
+    if return_tgt:
+        return inp, tgt
+    return inp

@@ -23,7 +23,7 @@ class VQADataset(Dataset):
 
 
 def get_dataset(image_preprocess, subset, images_path, questions_path, annotations_path=None,
-                gt_threshold=3, data_ratio=1.0):
+                gt_threshold=3, data_ratio=1.0, context_length: int = 77):
     """
 
     Parameters
@@ -45,6 +45,8 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
     data_ratio : float, optional
         keep only this ratio of data in the dataset
         Defaults to keep all of the dataset.
+    context_length : int, optional
+        The context length to use; all CLIP models use 77 as the context length
 
     Returns
     -------
@@ -93,8 +95,8 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
                 continue
             text += " " + answer
 
-        text = tokenize(text)[0]
-        data.append(dict(inp=text, tgt=text, image=image))
+        inp, tgt = tokenize(text, context_length=context_length, return_tgt=True)[0]
+        data.append(dict(inp=inp, tgt=tgt, image=image))
 
     dataset = VQADataset(data)
     print(f"Done! Total dataset size: {len(dataset)}")
