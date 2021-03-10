@@ -4,8 +4,10 @@ import json
 from pathlib import Path
 import warnings
 
-from transformers import Trainer, TrainingArguments, EvalPrediction
+from transformers import Trainer, TrainingArguments, EvalPrediction, logging
+import torch
 from torch import nn
+from torch.autograd import set_detect_anomaly
 
 from .clip import load
 import clip.model
@@ -78,6 +80,11 @@ def main():
     with open(config_path, "r") as file:
         config = json.load(file)
 
+    logging.set_verbosity(config.get("verbosity", logging.WARNING))
+
+    # debug (see torch.autograd.detect_anomaly)
+    set_detect_anomaly(bool(config.get("debug", False)))
+    
     # model
     print("loading model...")
     model_args = dict(name="ViT-B/32", jit=False, training=True, Class="CLIPDecoder")
