@@ -2,7 +2,6 @@
 from docopt import docopt
 import json
 from pathlib import Path
-import warnings
 
 from transformers import Trainer, TrainingArguments, EvalPrediction, logging
 import torch
@@ -12,6 +11,9 @@ from torch.autograd import set_detect_anomaly
 from .clip import load
 import clip.model
 from .data import get_datasets
+
+
+logger = logging.get_logger(__name__)
 
 
 class Learner(nn.Module):
@@ -69,7 +71,7 @@ def compute_metrics(prediction):
     metrics: dict
         {str: float}
     """
-    warnings.warn("No additional metrics have been implemented yet, returning an empty dict.")
+    logger.warning("No additional metrics have been implemented yet, returning an empty dict.")
     return {}
 
 
@@ -80,16 +82,16 @@ def main():
     with open(config_path, "r") as file:
         config = json.load(file)
 
-    logging.set_verbosity(config.get("verbosity", logging.WARNING))
+    logging.set_verbosity(config.get("verbosity", logging.INFO))
 
     # debug (see torch.autograd.detect_anomaly)
     set_detect_anomaly(bool(config.get("debug", False)))
     
     # model
-    print("loading model...")
     model_args = dict(name="ViT-B/32", jit=False, training=True, Class="CLIPDecoder")
     model_args.update(config.get("model", {}))
     model_args["Class"] = getattr(clip.model, model_args["Class"])
+    logger.info(f"loading model from pre-trained CLIP {model_args}...")
     model, image_preprocess = load(**model_args)
 
     # data
