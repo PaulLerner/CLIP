@@ -69,7 +69,7 @@ def available_models() -> List[str]:
 
 
 def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
-         jit=True, training=False, Class=CLIP):
+         jit=True, training=False, Class=CLIP, fp16=True):
     """Load a CLIP model
 
     Parameters
@@ -77,17 +77,21 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     name : str
         A model name listed by `clip.available_models()`, or the path to a model checkpoint containing the state_dict
 
-    device : Union[str, torch.device]
+    device : Union[str, torch.device], optional
         The device to put the loaded model
+        Defaults to cuda if available
 
-    jit : bool
+    jit : bool, optional
         Whether to load the optimized JIT model (default) or more hackable non-JIT model.
 
-    training : bool
+    training : bool, optional
         Whether to return the model in training or eval mode. Defaults to eval
 
-    Class : type
+    Class : type, optional
         Class of the model. Defaults to CLIP.
+
+    fp16 : bool, optional
+        Whether to use mixed-precision (default). Has no effect on CPU.
 
     Returns
     -------
@@ -117,7 +121,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
 
     if not jit:
         model = build_model(state_dict or model.state_dict(), training=training, Class=Class).to(device)
-        if str(device) == "cpu":
+        if str(device) == "cpu" or not fp16:
             model.float()
         return model, _transform(model.visual.input_resolution)
     elif Class != CLIP:
@@ -142,7 +146,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     patch_device(model.encode_text)
 
     # patch dtype to float32 on CPU
-    if str(device) == "cpu":
+    if str(device) == "cpu" or not fp16:
         float_holder = torch.jit.trace(lambda: torch.ones([]).float(), example_inputs=[])
         float_input = list(float_holder.graph.findNode("aten::to").inputs())[1]
         float_node = float_input.node()
