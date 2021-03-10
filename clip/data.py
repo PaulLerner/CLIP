@@ -12,11 +12,16 @@ JPG_FORMAT = "COCO_{subset}_{image_id:012d}.jpg"
 
 
 class VQADataset(Dataset):
-    def __init__(self, data):
+    def __init__(self, data, image_preprocess):
         self.data = data
+        self.image_preprocess = image_preprocess
 
     def __getitem__(self, idx):
-        return self.data[idx]
+        item = self.data[idx]
+        if "image" not in item:
+            image_path = item.pop("image_path")
+            item["image"] = self.image_preprocess(Image.open(image_path))
+        return item
 
     def __len__(self):
         return len(self.data)
@@ -82,7 +87,6 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
         else:
             question = qa
         image_path = images_path / JPG_FORMAT.format(subset=subset, image_id=question['image_id'])
-        image = image_preprocess(Image.open(image_path))
 
         # remove all punctuations marks in the question except for the final one
         text = question['question'].strip().replace("?", "") + "?"
@@ -96,9 +100,9 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
             text += " " + answer
 
         inp, tgt = tokenize(text, context_length=context_length, return_tgt=True)
-        data.append(dict(inp=inp[0], tgt=tgt[0], image=image))
+        data.append(dict(inp=inp[0], tgt=tgt[0], image_path=image_path))
 
-    dataset = VQADataset(data)
+    dataset = VQADataset(data, image_preprocess)
     print(f"Done! Total dataset size: {len(dataset)}")
     return dataset
 
