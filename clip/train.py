@@ -2,6 +2,7 @@
 from docopt import docopt
 import json
 from pathlib import Path
+import sys
 
 from transformers import Trainer, TrainingArguments, EvalPrediction, logging
 import torch
@@ -102,7 +103,9 @@ def main():
     # get criterion class (e.g. nn.NLLLoss) by name
     CriterionClass = getattr(nn, criterion_args.pop("Class", "NLLLoss"))
     criterion = CriterionClass(**criterion_args)
-    learner = LanguageModel(model, criterion)
+    learner_args = config.get("learner", {})
+    LearnerClass = getattr(sys.modules[__name__], learner_args.pop("Class", "LanguageModel"))
+    learner = LearnerClass(model, criterion)
     training_args = TrainingArguments(**config.get("training", {}))
     trainer = Trainer(model=learner, args=training_args,
                       train_dataset=train_dataset, eval_dataset=eval_dataset,
