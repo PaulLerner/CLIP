@@ -7,6 +7,11 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.nn.init import xavier_uniform_, xavier_normal_, constant_
 
+from .simple_tokenizer import SimpleTokenizer as _Tokenizer
+
+
+_tokenizer = _Tokenizer()
+
 
 class Bottleneck(nn.Module):
     expansion = 4
@@ -810,7 +815,9 @@ class CLIPDecoder(BaseCLIP):
                  decoder_dropout: float = 0.,
                  bias: bool = True,
                  add_bias_kv: bool = False,
-                 add_zero_attn: bool = False
+                 add_zero_attn: bool = False,
+                 separator: int = _tokenizer.encode("?")[0],
+                 eos: int = _tokenizer.encode("<|endoftext|>")[0]
                  ):
         super().__init__(context_length, vocab_size, transformer_width)
         if isinstance(vision_layers, (tuple, list)):
@@ -838,6 +845,8 @@ class CLIPDecoder(BaseCLIP):
         )
         self.linear = nn.Linear(embed_dim, vocab_size)
         self.log_softmax = nn.LogSoftmax(-1)
+        self.separator = separator
+        self.eos = eos
         self.initialize_parameters()
 
     def encode_image(self, image):
@@ -848,7 +857,7 @@ class CLIPDecoder(BaseCLIP):
         Parameters
         ----------
         text: Tensor
-            (batch_size, context_length, embed_dim)
+            (batch_size, context_length)
             Beware this is the first argument unlike in CLIP and BaseCLIP
         image: Tensor
             (batch_size, in_channels, height, width)
@@ -876,6 +885,67 @@ class CLIPDecoder(BaseCLIP):
         # predict the next token
         x = self.linear(x)
         return self.log_softmax(x)
+
+    def greedy_decoding(self, text, image):
+        """see forward"""
+        # encode image with visual encoder
+        image_features = self.encode_image(image)
+
+        # embed text
+        token_embeddings = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
+        question = token_embeddings + self.positional_embedding.type(self.dtype)
+
+        # fix shape and pass through the multimodal transformer
+        question = question.permute(1, 0, 2)  # NLD -> LND
+        image_features = image_features.permute(1, 0, 2)
+        question = self.transformer(question, image_features,
+                                    memory_mask=None, memory_key_padding_mask=None)
+        question = question.permute(1, 0, 2)  # LND -> NLD
+
+        # predict the next token
+        question = self.linear(question)
+        prediction = question.argmax(-1)
+
+        # update input w.r.t prediction
+        batch_size = prediction.shape[0]
+        max_index_batch = torch.full((batch_size, ), self.context_length-1)
+        where = prediction == self.separator
+        nonzero = where.nonzero(as_tuple=False)
+        # no separator in the batch
+        if not where.any():
+            first_where = torch.zeros(batch_size, dtype=torch.long)
+        # exactly one separator per item in the batch
+        elif nonzero[:, 0].unique().shape[0] == batch_size:
+            first_where = nonzero[:, 1] + 1
+        # multiple separators per item in the batch -> keep only the first one
+        else:
+            first_where = []
+            for item in where:
+                nonzero = item.nonzero(as_tuple=False)
+                if nonzero.shape[0] == 0:
+                    first_where.append(torch.zeros((1, 1), dtype=torch.long))
+                else:
+                    first_where.append(nonzero[0] + 1)
+            first_where = torch.cat(first_where, axis=0)
+        first_where = first_where.minimum(max_index_batch)
+
+        # sequential decoding until max_length or eos
+        while not ((first_where == max_index_batch) or (prediction == self.eos).any(dim=1)).all():
+            answer = prediction[:, first_where]
+            token_embeddings[:, first_where] = self.token_embedding(answer).type(self.dtype)
+            question = token_embeddings + self.positional_embedding.type(self.dtype)
+            question = question.permute(1, 0, 2)  # NLD -> LND
+            # TODO: cache previous hidden-states instead of recomputing every time
+            question = self.transformer(question, image_features,
+                                        memory_mask=None, memory_key_padding_mask=None)
+            question = question.permute(1, 0, 2)  # LND -> NLD
+
+            # predict the next token
+            question = self.linear(question)
+            prediction = question.argmax(-1)
+            first_where = (first_where + 1).minimum(max_index_batch)
+
+        return self.log_softmax(question)
 
 
 def convert_weights(model: nn.Module):
