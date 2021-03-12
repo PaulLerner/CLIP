@@ -221,7 +221,8 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt:
 
 def detokenize(inp: torch.LongTensor,
                remove_special_tokens: bool = True,
-               answer_only: bool = False) -> List[str]:
+               answer_only: bool = False,
+               ignore_index: int = -100) -> List[str]:
     """
     Yields the string representation of the input tokens (one str per item Tensor in the batch)
 
@@ -239,6 +240,10 @@ def detokenize(inp: torch.LongTensor,
     ------
     text: str
     """
+    # set all padding tokens to 0 (instead of -100, see tokenize)
+    inp[inp<0] = 0
+
+    # tensor to np.ndarray
     inp = inp.detach().cpu().numpy()
 
     for tokens in inp:
@@ -247,7 +252,11 @@ def detokenize(inp: torch.LongTensor,
             if answer_only:
                 start = text.find("?") + 1
             elif remove_special_tokens:
-                start = text.find(SOT_STR) + 1
+                start = text.find(SOT_STR)
+                if start < 0:
+                    start = 0
+                else:
+                    start += len(SOT_STR)
             end = text.find(EOT_STR)
             if end < 0:
                 end = len(text)
