@@ -3,6 +3,8 @@ from docopt import docopt
 import json
 from pathlib import Path
 import sys
+from typing import Any, Dict, List, Optional, Tuple, Union
+from packaging import version
 
 import numpy as np
 
@@ -10,6 +12,8 @@ from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPredictio
 import torch
 from torch import nn
 from torch.autograd import set_detect_anomaly
+if version.parse(torch.__version__) >= version.parse("1.6"):
+    from torch.cuda.amp import autocast
 
 from .clip import load, detokenize
 import clip.model
@@ -19,10 +23,69 @@ from .data import get_datasets
 logger = logging.get_logger(__name__)
 
 
-class Config:
-    def __init__(self, max_length):
-        self.max_length = max_length
-        self.num_beams = 0
+class CLIPTrainer(Seq2SeqTrainer):
+    """
+    Like Seq2SeqTrainer but without the transformers specifics for generation
+    Also passes all of the inputs to the model.generate method
+    """
+    def prediction_step(
+        self,
+        model: nn.Module,
+        inputs: Dict[str, Union[torch.Tensor, Any]],
+        prediction_loss_only: bool,
+        ignore_keys: Optional[List[str]] = None,
+    ) -> Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Perform an evaluation step on :obj:`model` using obj:`inputs`.
+
+        Subclass and override to inject custom behavior.
+
+        Args:
+            model (:obj:`nn.Module`):
+                The model to evaluate.
+            inputs (:obj:`Dict[str, Union[torch.Tensor, Any]]`):
+                The inputs and targets of the model.
+
+                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
+                argument :obj:`labels`. Check your model's documentation for all accepted arguments.
+            prediction_loss_only (:obj:`bool`):
+                Whether or not to return the loss only.
+
+        Return:
+            Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]: A tuple with the loss, logits and
+            labels (each being optional).
+        """
+
+        if not self.args.predict_with_generate or prediction_loss_only:
+            return super().prediction_step(
+                model, inputs, prediction_loss_only=prediction_loss_only, ignore_keys=ignore_keys
+            )
+
+        has_labels = "labels" in inputs
+        inputs = self._prepare_inputs(inputs)
+
+        generated_tokens = self.model.generate(**inputs)
+
+        with torch.no_grad():
+            if self.use_amp:
+                with autocast():
+                    outputs = model(**inputs)
+            else:
+                outputs = model(**inputs)
+            if has_labels:
+                if self.label_smoother is not None:
+                    loss = self.label_smoother(outputs, inputs["labels"]).mean().detach()
+                else:
+                    loss = (outputs["loss"] if isinstance(outputs, dict) else outputs[0]).mean().detach()
+            else:
+                loss = None
+
+        if self.args.prediction_loss_only:
+            return (loss, None, None)
+
+        labels = inputs["labels"]
+
+        return (loss, generated_tokens, labels)
 
 
 class Learner(nn.Module):
@@ -57,10 +120,6 @@ class Learner(nn.Module):
 
 class LanguageModel(Learner):
     """Shifts output and target tokens before computing the loss"""
-
-    def __init__(self, model, criterion, max_length=77):
-        super().__init__(model, criterion)
-        self.config = Config(max_length=max_length)
 
     def forward(self, input_ids, labels, *args, **kwargs):
         out = self.model(input_ids, *args, **kwargs)
@@ -126,9 +185,9 @@ def main():
     LearnerClass = getattr(sys.modules[__name__], learner_args.pop("Class", "LanguageModel"))
     learner = LearnerClass(model, criterion)
     training_args = Seq2SeqTrainingArguments(**config.get("training", {}))
-    trainer = Seq2SeqTrainer(model=learner, args=training_args,
-                             train_dataset=train_dataset, eval_dataset=eval_dataset,
-                             compute_metrics=compute_metrics)
+    trainer = CLIPTrainer(model=learner, args=training_args,
+                          train_dataset=train_dataset, eval_dataset=eval_dataset,
+                          compute_metrics=compute_metrics)
     trainer.train(**config.get("checkpoint", {}))
 
 
