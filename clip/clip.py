@@ -4,6 +4,8 @@ import urllib
 import warnings
 from typing import Union, List, Tuple
 
+import numpy as np
+
 import torch
 from PIL import Image
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
@@ -219,7 +221,7 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt:
     return inp
 
 
-def detokenize(inp: torch.LongTensor,
+def detokenize(inp: np.ndarray,
                remove_special_tokens: bool = True,
                answer_only: bool = False,
                ignore_index: int = -100) -> List[str]:
@@ -228,7 +230,7 @@ def detokenize(inp: torch.LongTensor,
 
     Parameters
     ----------
-    inp : torch.LongTensor
+    inp : np.ndarray
         (batch_size, context_length)
     remove_special_tokens : bool, optional
         Whether to keep only what's in between SOT_STR and EOT_STR (default)
@@ -242,9 +244,6 @@ def detokenize(inp: torch.LongTensor,
     """
     # set all padding tokens to 0 (instead of -100, see tokenize)
     inp[inp<0] = 0
-
-    # tensor to np.ndarray
-    inp = inp.detach().cpu().numpy()
 
     for tokens in inp:
         text = _tokenizer.decode(tokens)
