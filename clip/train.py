@@ -4,12 +4,14 @@ import json
 from pathlib import Path
 import sys
 
+import numpy as np
+
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPrediction, logging
 import torch
 from torch import nn
 from torch.autograd import set_detect_anomaly
 
-from .clip import load
+from .clip import load, detokenize
 import clip.model
 from .data import get_datasets
 
@@ -71,7 +73,7 @@ class LanguageModel(Learner):
 
 
 def compute_metrics(prediction):
-    """Note that the model is note supposed to output an EvalPrediction object
+    """Note that the model is not supposed to output an EvalPrediction object
     The prediction is built inside trainer.prediction_loop
 
     Parameters
@@ -85,8 +87,12 @@ def compute_metrics(prediction):
     metrics: dict
         {str: float}
     """
-    logger.warning("No additional metrics have been implemented yet, returning an empty dict.")
-    return {}
+    predictions = prediction.predictions.argmax(-1)
+    labels = predictions.label_ids
+    predictions = np.asarray(detokenize(predictions, answer_only=True), dtype=str)
+    labels = np.asarray(detokenize(labels, answer_only=True), dtype=str)
+    accuracy = (predictions == labels).mean()
+    return dict(accuracy=accuracy)
 
 
 def main():
