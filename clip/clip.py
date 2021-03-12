@@ -2,7 +2,7 @@ import hashlib
 import os
 import urllib
 import warnings
-from typing import Union, List
+from typing import Union, List, Tuple
 
 import torch
 from PIL import Image
@@ -10,9 +10,9 @@ from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normal
 from tqdm import tqdm
 
 from .model import build_model, CLIP
-from .simple_tokenizer import SimpleTokenizer as _Tokenizer
+from .simple_tokenizer import SimpleTokenizer as _Tokenizer, EOT_STR, SOT_STR
 
-__all__ = ["available_models", "load", "tokenize"]
+__all__ = ["available_models", "load", "tokenize", "detokenize"]
 _tokenizer = _Tokenizer()
 
 _MODELS = {
@@ -172,9 +172,9 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     return model, _transform(model.input_resolution.item())
 
 
-def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt: bool = False) -> torch.LongTensor:
+def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt: bool = False) -> Tuple[torch.LongTensor]:
     """
-    Returns the tokenized representation of given input string(s)
+    Returns the tokenized representation of the input string(s)
 
     Parameters
     ----------
@@ -199,8 +199,8 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt:
     if isinstance(texts, str):
         texts = [texts]
 
-    sot_token = _tokenizer.encoder["<|startoftext|>"]
-    eot_token = _tokenizer.encoder["<|endoftext|>"]
+    sot_token = _tokenizer.encoder[SOT_STR]
+    eot_token = _tokenizer.encoder[EOT_STR]
     all_tokens = [[sot_token] + _tokenizer.encode(text) + [eot_token] for text in texts]
     inp = torch.zeros(len(all_tokens), context_length, dtype=torch.long)
     if return_tgt:
@@ -217,3 +217,39 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt:
     if return_tgt:
         return inp, tgt
     return inp
+
+
+def detokenize(inp: torch.LongTensor,
+               remove_special_tokens: bool = True,
+               answer_only: bool = False) -> List[str]:
+    """
+    Yields the string representation of the input tokens (one str per item Tensor in the batch)
+
+    Parameters
+    ----------
+    inp : torch.LongTensor
+        (batch_size, context_length)
+    remove_special_tokens : bool, optional
+        Whether to keep only what's in between SOT_STR and EOT_STR (default)
+    answer_only : bool, optional
+        overrides remove_special_tokens: keep only what's in between "?" and EOT_STR
+        Defaults to False
+
+    Yields
+    ------
+    text: str
+    """
+    inp = inp.detach().cpu().numpy()
+
+    for tokens in inp:
+        text = _tokenizer.decode(tokens)
+        if answer_only or remove_special_tokens:
+            if answer_only:
+                start = text.find("?") + 1
+            elif remove_special_tokens:
+                start = text.find(SOT_STR) + 1
+            end = text.find(EOT_STR)
+            if end < 0:
+                end = len(text)
+            text = text[start: end]
+        yield text.strip()

@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.nn.init import xavier_uniform_, xavier_normal_, constant_
 
-from .simple_tokenizer import SimpleTokenizer as _Tokenizer
+from .simple_tokenizer import SimpleTokenizer as _Tokenizer, EOT_STR
 
 
 _tokenizer = _Tokenizer()
@@ -819,7 +819,7 @@ class CLIPDecoder(BaseCLIP):
                  add_bias_kv: bool = False,
                  add_zero_attn: bool = False,
                  separator: int = _tokenizer.encode("?")[0],
-                 eos: int = _tokenizer.encode("<|endoftext|>")[0]
+                 eos: int = _tokenizer.encode(EOT_STR)[0]
                  ):
         super().__init__(context_length, vocab_size, transformer_width)
         if isinstance(vision_layers, (tuple, list)):
