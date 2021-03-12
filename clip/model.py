@@ -919,12 +919,12 @@ class CLIPDecoder(BaseCLIP):
 
         # update input w.r.t prediction
         batch_size = prediction.shape[0]
-        max_index_batch = torch.full((batch_size, ), self.context_length-1)
+        max_index_batch = torch.full((batch_size, ), self.context_length-1, device=input_ids.device)
         where = prediction == self.separator
         nonzero = where.nonzero(as_tuple=False)
         # no separator in the batch
         if not where.any():
-            first_where = torch.zeros(batch_size, dtype=torch.long)
+            first_where = torch.zeros(batch_size, dtype=torch.long, device=input_ids.device)
         # exactly one separator per item in the batch
         elif nonzero[:, 0].unique().shape[0] == batch_size:
             first_where = nonzero[:, 1] + 1
@@ -934,14 +934,14 @@ class CLIPDecoder(BaseCLIP):
             for item in where:
                 nonzero = item.nonzero(as_tuple=False)
                 if nonzero.shape[0] == 0:
-                    first_where.append(torch.zeros((1, 1), dtype=torch.long))
+                    first_where.append(torch.zeros((1, 1), dtype=torch.long, device=input_ids.device))
                 else:
                     first_where.append(nonzero[0] + 1)
             first_where = torch.cat(first_where, axis=0)
         first_where = first_where.minimum(max_index_batch)
 
         # sequential decoding until max_length or eos
-        while not ((first_where == max_index_batch) or (prediction == self.eos).any(dim=1)).all():
+        while not torch.logical_or((first_where == max_index_batch), (prediction == self.eos).any(dim=1)).all():
             answer = prediction[:, first_where]
             token_embeddings[:, first_where] = self.token_embedding(answer).type(self.dtype)
             question = token_embeddings + self.positional_embedding.type(self.dtype)
