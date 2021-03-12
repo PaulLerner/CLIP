@@ -131,13 +131,13 @@ class LanguageModel(Learner):
         return loss, out
 
 
-def compute_metrics(prediction):
+def compute_metrics(pred_and_label):
     """Note that the model is not supposed to output an EvalPrediction object
     The prediction is built inside trainer.prediction_loop
 
     Parameters
     ----------
-    prediction: EvalPrediction
+    pred_and_label: EvalPrediction
         A named tuple with predictions and label_ids attributes
         Note that predictions is the output of the model and has not been "argmaxed"
 
@@ -146,10 +146,10 @@ def compute_metrics(prediction):
     metrics: dict
         {str: float}
     """
-    predictions = prediction.predictions.argmax(-1)
-    labels = predictions.label_ids
-    predictions = np.asarray(detokenize(predictions, answer_only=True), dtype=str)
-    labels = np.asarray(detokenize(labels, answer_only=True), dtype=str)
+    predictions = pred_and_label.predictions.argmax(-1)
+    labels = pred_and_label.label_ids
+    predictions = np.asarray(list(detokenize(predictions, answer_only=True)), dtype=str)
+    labels = np.asarray(list(detokenize(labels, answer_only=True)), dtype=str)
     accuracy = (predictions == labels).mean()
     return dict(accuracy=accuracy)
 
