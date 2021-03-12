@@ -100,7 +100,7 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
             text += " " + answer
 
         inp, tgt = tokenize(text, context_length=context_length, return_tgt=True)
-        data.append(dict(inp=inp[0], tgt=tgt[0], image_path=image_path))
+        data.append(dict(input_ids=inp[0], labels=tgt[0], image_path=image_path, attention_mask=None))
 
     dataset = VQADataset(data, image_preprocess)
     print(f"Done! Total dataset size: {len(dataset)}")

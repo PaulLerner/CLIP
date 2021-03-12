@@ -798,6 +798,8 @@ class CLIPDecoder(BaseCLIP):
     Also adds a final classification layer to predict the next token in the text
 
     Note that TransformerDecoder cross-attention parameters are initialized in SingleheadAttention
+
+    Note that text is named "input_ids" to respect HF-transformers convention
     """
     def __init__(self,
                  embed_dim: int,
@@ -852,11 +854,11 @@ class CLIPDecoder(BaseCLIP):
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))
 
-    def forward(self, text, image):
+    def forward(self, input_ids, image):
         """
         Parameters
         ----------
-        text: Tensor
+        input_ids: Tensor
             (batch_size, context_length)
             Beware this is the first argument unlike in CLIP and BaseCLIP
         image: Tensor
@@ -872,7 +874,7 @@ class CLIPDecoder(BaseCLIP):
         image_features = self.encode_image(image)
 
         # embed text
-        x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
+        x = self.token_embedding(input_ids).type(self.dtype)  # [batch_size, n_ctx, d_model]
         x = x + self.positional_embedding.type(self.dtype)
 
         # fix shape and pass through the multimodal transformer
@@ -886,13 +888,22 @@ class CLIPDecoder(BaseCLIP):
         x = self.linear(x)
         return self.log_softmax(x)
 
-    def greedy_decoding(self, text, image):
+    def generate(self, input_ids, image, *args, **kwargs):
+        """
+        Ignores additional arguments.
+        Disables gradient calculation.
+        Returns Greedy decoding.
+        """
+        with torch.no_grad():
+            return self.greedy_decoding(input_ids, image)
+
+    def greedy_decoding(self, input_ids, image):
         """see forward"""
         # encode image with visual encoder
         image_features = self.encode_image(image)
 
         # embed text
-        token_embeddings = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
+        token_embeddings = self.token_embedding(input_ids).type(self.dtype)  # [batch_size, n_ctx, d_model]
         question = token_embeddings + self.positional_embedding.type(self.dtype)
 
         # fix shape and pass through the multimodal transformer

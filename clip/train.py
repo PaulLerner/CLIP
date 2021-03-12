@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 
-from transformers import Trainer, TrainingArguments, EvalPrediction, logging
+from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPrediction, logging
 import torch
 from torch import nn
 from torch.autograd import set_detect_anomaly
@@ -15,6 +15,12 @@ from .data import get_datasets
 
 
 logger = logging.get_logger(__name__)
+
+
+class Config:
+    def __init__(self, max_length):
+        self.max_length = max_length
+        self.num_beams = 0
 
 
 class Learner(nn.Module):
@@ -36,24 +42,31 @@ class Learner(nn.Module):
         self.model = model
         self.criterion = criterion
 
-    def forward(self, inp, tgt, *args, **kwargs):
+    def forward(self, input_ids, labels, *args, **kwargs):
         """Additional arguments should be passed to self.model"""
-        out = self.model(inp, *args, **kwargs)
+        out = self.model(input_ids, *args, **kwargs)
         # Flatten and compute the loss
-        loss = self.criterion(out.view(-1, out.size(-1)), tgt.view(-1))
+        loss = self.criterion(out.view(-1, out.size(-1)), labels.view(-1))
         return loss, out
+
+    def generate(self, *args, **kwargs):
+        return self.model.generate(*args, **kwargs)
 
 
 class LanguageModel(Learner):
     """Shifts output and target tokens before computing the loss"""
 
-    def forward(self, inp, tgt, *args, **kwargs):
-        out = self.model(inp, *args, **kwargs)
+    def __init__(self, model, criterion, max_length=77):
+        super().__init__(model, criterion)
+        self.config = Config(max_length=max_length)
+
+    def forward(self, input_ids, labels, *args, **kwargs):
+        out = self.model(input_ids, *args, **kwargs)
         # Shift so that tokens < n predict n
         shifted_out = out[..., :-1, :].contiguous()
-        shifted_tgt = tgt[..., 1:].contiguous()
+        shifted_labels = labels[..., 1:].contiguous()
         # Flatten and compute the loss
-        loss = self.criterion(shifted_out.view(-1, shifted_out.size(-1)), shifted_tgt.view(-1))
+        loss = self.criterion(shifted_out.view(-1, shifted_out.size(-1)), shifted_labels.view(-1))
         return loss, out
 
 
@@ -106,10 +119,10 @@ def main():
     learner_args = config.get("learner", {})
     LearnerClass = getattr(sys.modules[__name__], learner_args.pop("Class", "LanguageModel"))
     learner = LearnerClass(model, criterion)
-    training_args = TrainingArguments(**config.get("training", {}))
-    trainer = Trainer(model=learner, args=training_args,
-                      train_dataset=train_dataset, eval_dataset=eval_dataset,
-                      compute_metrics=compute_metrics)
+    training_args = Seq2SeqTrainingArguments(**config.get("training", {}))
+    trainer = Seq2SeqTrainer(model=learner, args=training_args,
+                             train_dataset=train_dataset, eval_dataset=eval_dataset,
+                             compute_metrics=compute_metrics)
     trainer.train(**config.get("checkpoint", {}))
 
 
