@@ -606,7 +606,7 @@ class BaseVisualTransformer(nn.Module):
 
         self.transformer = Transformer(width, layers, heads)
 
-    def base_forward(self, x: Tensor):
+    def forward(self, x: Tensor):
         """Runs through the Transformer but doesn't project in the multimodal space
         Also keeps all of the tokens' hidden states instead of keeping only the class_embedding"""
         x = self.conv1(x)  # shape = [*, width, grid, grid]
@@ -622,8 +622,6 @@ class BaseVisualTransformer(nn.Module):
 
         return x
 
-    def forward(self, x: Tensor):
-        return self.base_forward(x)
 
 
 class VisualTransformer(BaseVisualTransformer):
@@ -637,7 +635,7 @@ class VisualTransformer(BaseVisualTransformer):
 
     def forward(self, x: Tensor):
         """Keeps only class embedding as final representation and project it in the multimodal space"""
-        x = self.base_forward(x)
+        x = super().forward(x)
         x = self.ln_post(x[:, 0, :])
 
         if self.proj is not None:
@@ -660,7 +658,7 @@ class BaseCLIP(nn.Module):
         self.token_embedding = nn.Embedding(vocab_size, transformer_width)
         self.positional_embedding = nn.Parameter(torch.empty(self.context_length, transformer_width))
 
-    def base_initialize_parameters(self):
+    def initialize_parameters(self):
         """Note that (Base)VisualTransformer parameters are initialized in its constructor"""
         nn.init.normal_(self.token_embedding.weight, std=0.02)
         nn.init.normal_(self.positional_embedding, std=0.01)
@@ -686,9 +684,6 @@ class BaseCLIP(nn.Module):
             nn.init.normal_(block.attn.out_proj.weight, std=proj_std)
             nn.init.normal_(block.mlp.c_fc.weight, std=fc_std)
             nn.init.normal_(block.mlp.c_proj.weight, std=proj_std)
-
-    def initialize_parameters(self):
-        self.base_initialize_parameters()
 
     def build_attention_mask(self):
         # lazily create causal attention mask, with full attention between the vision tokens
@@ -753,7 +748,7 @@ class CLIP(BaseCLIP):
         self.initialize_parameters()
 
     def initialize_parameters(self):
-        self.base_initialize_parameters()
+        super().initialize_parameters()
         if self.text_projection is not None:
             nn.init.normal_(self.text_projection, std=self.transformer.width ** -0.5)
 
