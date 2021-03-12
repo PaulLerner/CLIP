@@ -6,7 +6,7 @@ import sys
 
 import numpy as np
 
-from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPrediction, logging
+from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPrediction, logging, PretrainedConfig
 import torch
 from torch import nn
 from torch.autograd import set_detect_anomaly
@@ -17,12 +17,6 @@ from .data import get_datasets
 
 
 logger = logging.get_logger(__name__)
-
-
-class Config:
-    def __init__(self, max_length):
-        self.max_length = max_length
-        self.num_beams = 0
 
 
 class Learner(nn.Module):
@@ -60,7 +54,7 @@ class LanguageModel(Learner):
 
     def __init__(self, model, criterion, max_length=77):
         super().__init__(model, criterion)
-        self.config = Config(max_length=max_length)
+        self.config = PretrainedConfig(max_length=max_length, num_beams=1)
 
     def forward(self, input_ids, labels, *args, **kwargs):
         out = self.model(input_ids, *args, **kwargs)
