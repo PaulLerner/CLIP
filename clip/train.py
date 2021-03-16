@@ -115,7 +115,14 @@ class Learner(nn.Module):
         return loss, out
 
     def generate(self, *args, **kwargs):
-        return self.model.generate(*args, **kwargs)
+        """
+        Pass all arguments to self.model.generate
+        Applies argmax to the last dimension of the model output to save memory
+        (see https://github.com/huggingface/transformers/issues/10722)
+
+        Beware this might break your code as it's not the expected behaviour in transformers Trainer
+        """
+        return self.model.generate(*args, **kwargs).argmax(-1)
 
 
 class LanguageModel(Learner):
@@ -139,14 +146,15 @@ def compute_metrics(pred_and_label):
     ----------
     pred_and_label: EvalPrediction
         A named tuple with predictions and label_ids attributes
-        Note that predictions is the output of the model and has not been "argmaxed"
+        Note that predictions is the output of model.generate and has already been "argmaxed"
+        This function would not work with the output of model.forward (prob. distribution over the tokens)
 
     Returns
     -------
     metrics: dict
         {str: float}
     """
-    predictions = pred_and_label.predictions.argmax(-1)
+    predictions = pred_and_label.predictions
     labels = pred_and_label.label_ids
     predictions = np.asarray(list(detokenize(predictions, answer_only=True)), dtype=str)
     labels = np.asarray(list(detokenize(labels, answer_only=True)), dtype=str)
