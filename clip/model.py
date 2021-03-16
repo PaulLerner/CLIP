@@ -921,7 +921,7 @@ class CLIPDecoder(BaseCLIP):
         if not where.any():
             first_where = torch.zeros(batch_size, dtype=torch.long, device=input_ids.device)
         # exactly one separator per item in the batch
-        elif nonzero[:, 0].unique().shape[0] == batch_size:
+        elif nonzero.shape[0] == batch_size and nonzero[:, 0].unique().shape[0] == batch_size:
             first_where = nonzero[:, 1] + 1
         # multiple separators per item in the batch -> keep only the first one
         else:
@@ -929,7 +929,7 @@ class CLIPDecoder(BaseCLIP):
             for item in where:
                 nonzero = item.nonzero(as_tuple=False)
                 if nonzero.shape[0] == 0:
-                    first_where.append(torch.zeros((1, 1), dtype=torch.long, device=input_ids.device))
+                    first_where.append(torch.zeros((1, ), dtype=torch.long, device=input_ids.device))
                 else:
                     first_where.append(nonzero[0] + 1)
             first_where = torch.cat(first_where, axis=0)
