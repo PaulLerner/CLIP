@@ -17,10 +17,9 @@ class VQADataset(Dataset):
         self.image_preprocess = image_preprocess
 
     def __getitem__(self, idx):
-        item = self.data[idx]
-        if "image" not in item:
-            image_path = item.pop("image_path")
-            item["image"] = self.image_preprocess(Image.open(image_path))
+        item = self.data[idx].copy()
+        image_path = item.pop("image_path")
+        item["image"] = self.image_preprocess(Image.open(image_path))
         return item
 
     def __len__(self):
