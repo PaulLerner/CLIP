@@ -162,13 +162,7 @@ def compute_metrics(pred_and_label):
     return dict(accuracy=accuracy)
 
 
-def main():
-    # load and parse arguments
-    args = docopt(__doc__)
-    config_path = Path(args['<config>'])
-    with open(config_path, "r") as file:
-        config = json.load(file)
-
+def instantiate_trainer(config):
     logging.set_verbosity(config.get("verbosity", logging.INFO))
 
     # debug (see torch.autograd.detect_anomaly)
@@ -196,6 +190,17 @@ def main():
     trainer = CLIPTrainer(model=learner, args=training_args,
                           train_dataset=train_dataset, eval_dataset=eval_dataset,
                           compute_metrics=compute_metrics)
+    return trainer, config
+
+
+def main():
+    # load and parse arguments
+    args = docopt(__doc__)
+    config_path = Path(args['<config>'])
+    with open(config_path, "r") as file:
+        config = json.load(file)
+
+    trainer, config = instantiate_trainer(config)
     trainer.train(**config.get("checkpoint", {}))
 
 
