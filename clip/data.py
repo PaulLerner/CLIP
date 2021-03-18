@@ -27,7 +27,7 @@ class VQADataset(Dataset):
 
 
 def get_dataset(image_preprocess, subset, images_path, questions_path, annotations_path=None,
-                gt_threshold=3, data_ratio=1.0, context_length: int = 77):
+                gt_threshold=3, data_ratio=1.0, context_length=77, eval=False):
     """
 
     Parameters
@@ -51,6 +51,9 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
         Defaults to keep all of the dataset.
     context_length : int, optional
         The context length to use; all CLIP models use 77 as the context length
+    eval : bool, optional
+        Whether to add answer (when available) to the input (default)
+        Has no effect on labels/target
 
     Returns
     -------
@@ -88,17 +91,22 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
         image_path = images_path / JPG_FORMAT.format(subset=subset, image_id=question['image_id'])
 
         # remove all punctuations marks in the question except for the final one
-        text = question['question'].strip().replace("?", "") + "?"
+        norm_question = question['question'].strip().replace("?", "") + "?"
         if annotations is not None:
-            # lowercase, strip whitespaces ans remove all punctuations marks in the answer
+            # lowercase, strip whitespaces and remove all punctuations marks in the answer
             answers = Counter(answer['answer'].lower().strip().replace("?", "") for answer in annotation['answers'])
             answer, count = answers.most_common(1)[0]
             # skip question if there is so little agreement between annotators that the most common answer is below threshold
             if count < gt_threshold:
                 continue
-            text += " " + answer
+            text = norm_question + " " + answer
 
-        inp, tgt = tokenize(text, context_length=context_length, return_tgt=True)
+        if eval and annotations is not None:
+            inp = tokenize(norm_question, context_length=context_length)
+            _, tgt = tokenize(text, context_length=context_length, return_tgt=True)
+        else:
+            inp, tgt = tokenize(norm_question, context_length=context_length, return_tgt=True)
+
         data.append(dict(input_ids=inp[0], labels=tgt[0], image_path=image_path, attention_mask=None))
 
     dataset = VQADataset(data, image_preprocess)
@@ -118,11 +126,11 @@ def get_datasets(**kwargs):
     train_paths = kwargs.pop("train_paths", None)
     eval_paths = kwargs.pop("eval_paths", None)
     if train_paths is not None:
-        train_dataset = get_dataset(**train_paths, **kwargs)
+        train_dataset = get_dataset(**train_paths, **kwargs, eval=False)
     else:
         train_dataset = None
     if eval_paths is not None:
-        eval_dataset = get_dataset(**eval_paths, **kwargs)
+        eval_dataset = get_dataset(**eval_paths, **kwargs, eval=True)
     else:
         eval_dataset = None
     return train_dataset, eval_dataset
