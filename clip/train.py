@@ -9,6 +9,7 @@ from packaging import version
 import numpy as np
 
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPrediction, logging
+from transformers.file_utils import WEIGHTS_NAME
 import torch
 from torch import nn
 from torch.autograd import set_detect_anomaly
@@ -200,7 +201,15 @@ def instantiate_trainer(config):
     trainer = CLIPTrainer(model=learner, args=training_args,
                           train_dataset=train_dataset, eval_dataset=eval_dataset,
                           compute_metrics=compute_metrics)
-    return trainer, config
+    return trainer, training_args, config
+
+
+def get_state_dict(resume_from_checkpoint, *args, **kwargs):
+    if args or kwargs:
+        logger.warning(f"ignoring additional arguments:\n{args}\n{kwargs}")
+
+    path = Path(resume_from_checkpoint, WEIGHTS_NAME)
+    return torch.load(path)
 
 
 def main():
@@ -210,8 +219,20 @@ def main():
     with open(config_path, "r") as file:
         config = json.load(file)
 
-    trainer, config = instantiate_trainer(config)
-    trainer.train(**config.get("checkpoint", {}))
+    trainer, training_args, config = instantiate_trainer(config)
+    checkpoint = config.get("checkpoint", {})
+    if training_args.do_train:
+        trainer.train(**checkpoint)
+    elif training_args.do_eval:
+        state_dict = get_state_dict(**checkpoint)
+        trainer.model.load_state_dict(state_dict)
+        trainer.evaluate()
+    elif training_args.do_predict:
+        raise NotImplementedError()
+    else:
+        logger.warning("Did nothing except instantiate the trainer, "
+                       "you probably want to set do_train, do_eval or do_predict to True"
+                       f"see {training_args.__doc__}")
 
 
 if __name__ == "__main__":
