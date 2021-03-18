@@ -206,12 +206,17 @@ def instantiate_trainer(config):
     return trainer, training_args, config
 
 
-def get_state_dict(resume_from_checkpoint, *args, **kwargs):
+def get_checkpoint(resume_from_checkpoint: str, *args, **kwargs) -> Path:
     if args or kwargs:
         logger.warning(f"ignoring additional arguments:\n{args}\n{kwargs}")
 
-    path = Path(resume_from_checkpoint, WEIGHTS_NAME)
-    return torch.load(path)
+    return Path(resume_from_checkpoint)
+
+
+def write_metrics(metrics, resume_from_checkpoint):
+    logger.info(metrics)
+    with open(resume_from_checkpoint/"metrics.json", "w") as file:
+        json.dump(metrics, file)
 
 
 def main():
@@ -226,9 +231,11 @@ def main():
     if training_args.do_train:
         trainer.train(**checkpoint)
     elif training_args.do_eval:
-        state_dict = get_state_dict(**checkpoint)
+        resume_from_checkpoint = get_checkpoint(**checkpoint)
+        state_dict = torch.load(resume_from_checkpoint / WEIGHTS_NAME)
         trainer.model.load_state_dict(state_dict)
-        trainer.evaluate()
+        metrics = trainer.evaluate()
+        write_metrics(metrics, resume_from_checkpoint)
     elif training_args.do_predict:
         raise NotImplementedError()
     else:
