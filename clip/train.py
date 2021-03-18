@@ -171,7 +171,9 @@ def compute_metrics(pred_and_label):
 
 
 def instantiate_trainer(config):
-    logging.set_verbosity(config.get("verbosity", logging.INFO))
+    verbosity = config.get("verbosity", logging.INFO)
+    logging.set_verbosity(verbosity)
+    logger.setLevel(verbosity)
 
     # debug (see torch.autograd.detect_anomaly)
     set_detect_anomaly(bool(config.get("debug", False)))
