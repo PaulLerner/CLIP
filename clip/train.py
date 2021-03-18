@@ -5,10 +5,11 @@ from pathlib import Path
 import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 from packaging import version
+import logging
 
 import numpy as np
 
-from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPrediction, logging
+from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPrediction, logging as t_logging
 from transformers.file_utils import WEIGHTS_NAME
 import torch
 from torch import nn
@@ -21,7 +22,8 @@ import clip.model
 from .data import get_datasets
 
 
-logger = logging.get_logger(__name__)
+logging.basicConfig()
+logger = logging.getLogger(__name__)
 
 
 class CLIPTrainer(Seq2SeqTrainer):
@@ -173,7 +175,7 @@ def compute_metrics(pred_and_label):
 
 def instantiate_trainer(config):
     verbosity = config.get("verbosity", logging.INFO)
-    logging.set_verbosity(verbosity)
+    t_logging.set_verbosity(verbosity)
     logger.setLevel(verbosity)
 
     # debug (see torch.autograd.detect_anomaly)
