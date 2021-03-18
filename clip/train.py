@@ -28,6 +28,14 @@ class CLIPTrainer(Seq2SeqTrainer):
     Like Seq2SeqTrainer but without the transformers specifics for generation
     Also passes all of the inputs to the model.generate method
     """
+
+    def log(self, logs: Dict[str, float]) -> None:
+        """Adds memory usage to the logs"""
+        for i in range(torch.cuda.device_count()):
+            device = f"cuda:{i}"
+            logs[f"max_memory_{device}"] = torch.cuda.max_memory_allocated(device)
+        return super().log(logs)
+
     def prediction_step(
         self,
         model: nn.Module,
