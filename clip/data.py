@@ -100,10 +100,14 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
             if count < gt_threshold:
                 continue
             text = norm_question + " " + answer
-
-        if eval and annotations is not None:
-            inp = tokenize(norm_question, context_length=context_length)
-            _, tgt = tokenize(text, context_length=context_length, return_tgt=True)
+            # validation setting: remove answer from input to avoid bias in evaluation
+            if eval:
+                inp = tokenize(norm_question, context_length=context_length)
+                _, tgt = tokenize(text, context_length=context_length, return_tgt=True)
+            # train setting: leave answer in the input to allow for teacher forcing
+            else:
+                inp, tgt = tokenize(text, context_length=context_length, return_tgt=True)
+        # test setting: answers are only available on the private server
         else:
             inp, tgt = tokenize(norm_question, context_length=context_length, return_tgt=True)
 
