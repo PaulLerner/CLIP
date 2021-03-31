@@ -6,10 +6,12 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 from packaging import version
 import logging
+from tqdm import tqdm
 
 import numpy as np
 
 from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPrediction, logging as t_logging
+from transformers.trainer_callback import TrainerState
 from transformers.file_utils import WEIGHTS_NAME
 import torch
 from torch import nn
@@ -206,11 +208,13 @@ def instantiate_trainer(config):
     return trainer, training_args, config
 
 
-def get_checkpoint(resume_from_checkpoint: str, *args, **kwargs) -> Path:
+def get_checkpoint(resume_from_checkpoint: str, *args, **kwargs) -> List[Path]:
     if args or kwargs:
         logger.warning(f"ignoring additional arguments:\n{args}\n{kwargs}")
-
-    return Path(resume_from_checkpoint)
+    cpt = Path(resume_from_checkpoint)
+    # weird trick to glob using pathlib
+    resume_from_checkpoints = list(cpt.parent.glob(cpt.name))
+    return resume_from_checkpoints
 
 
 def write_metrics(metrics, resume_from_checkpoint):
@@ -231,11 +235,19 @@ def main():
     if training_args.do_train:
         trainer.train(**checkpoint)
     elif training_args.do_eval:
-        resume_from_checkpoint = get_checkpoint(**checkpoint)
-        state_dict = torch.load(resume_from_checkpoint / WEIGHTS_NAME)
-        trainer.model.load_state_dict(state_dict)
-        metrics = trainer.evaluate()
-        write_metrics(metrics, resume_from_checkpoint)
+        resume_from_checkpoints = get_checkpoint(**checkpoint)
+        for resume_from_checkpoint in tqdm(resume_from_checkpoints, desc="Evaluating"):
+            # load state dict
+            state_dict = torch.load(resume_from_checkpoint / WEIGHTS_NAME)
+            trainer.model.load_state_dict(state_dict)
+            # optionally load trainer state for better logging
+            trainer_state = resume_from_checkpoint/"trainer_state.json"
+            if trainer_state.is_file():
+                trainer.state = TrainerState.load_from_json(trainer_state)
+            else:
+                logger.warning("couldn't load trainer state, TB logging might use an inappropriate step")
+            metrics = trainer.evaluate()
+            write_metrics(metrics, resume_from_checkpoint)
     elif training_args.do_predict:
         raise NotImplementedError()
     else:
