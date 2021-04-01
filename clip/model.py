@@ -986,7 +986,21 @@ def convert_weights(model: nn.Module):
     model.apply(_convert_weights_to_fp16)
 
 
-def build_model(state_dict: dict, training=False, Class=CLIP):
+def build_model(state_dict: dict, training=False, Class=CLIP, context_length=None):
+    """
+
+    Parameters
+    ----------
+    state_dict: OrderedDict[Tensor]
+    training: bool, optional
+    Class: type, optional
+    context_length: int, optional
+        Defaults to the size of the pre-trained model (i.e. in state_dict)
+
+    Returns
+    -------
+    model: BaseCLIP
+    """
     vit = "visual.proj" in state_dict
 
     if vit:
@@ -1005,7 +1019,17 @@ def build_model(state_dict: dict, training=False, Class=CLIP):
         image_resolution = output_width * 32
 
     embed_dim = state_dict["text_projection"].shape[1]
-    context_length = state_dict["positional_embedding"].shape[0]
+
+    # resize positional embedding if necessary (i.e. when fine-tuning context is different from pre-training context)
+    old_context_length = state_dict["positional_embedding"].shape[0]
+    if context_length is None:
+        context_length = old_context_length
+    elif context_length < old_context_length:
+        state_dict["positional_embedding"] = state_dict["positional_embedding"][: context_length]
+    elif context_length > old_context_length:
+        raise NotImplementedError(f"Target context length {context_length} is greater "
+                                  f"than pre-trained context length {old_context_length}")
+
     vocab_size = state_dict["token_embedding.weight"].shape[0]
     transformer_width = state_dict["ln_final.weight"].shape[0]
     transformer_heads = transformer_width // 64
