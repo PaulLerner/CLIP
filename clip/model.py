@@ -986,7 +986,7 @@ def convert_weights(model: nn.Module):
     model.apply(_convert_weights_to_fp16)
 
 
-def build_model(state_dict: dict, training=False, Class=CLIP, context_length=None, **kwargs):
+def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context_length=None, **kwargs):
     """
 
     Parameters
@@ -994,6 +994,7 @@ def build_model(state_dict: dict, training=False, Class=CLIP, context_length=Non
     state_dict: OrderedDict[Tensor]
     training: bool, optional
     Class: type, optional
+    fp16: bool, optional
     context_length: int, optional
         Defaults to the size of the pre-trained model (i.e. in state_dict)
     **kwargs: additional arguments are passed to Class
@@ -1074,7 +1075,8 @@ def build_model(state_dict: dict, training=False, Class=CLIP, context_length=Non
             state_dict[f"transformer.resblocks.{i}.ln_cross_attn.weight"] = ln_final_weight
 
 
-    convert_weights(model)
+    if fp16:
+        convert_weights(model)
     loading_output = model.load_state_dict(state_dict, strict=not isinstance(model, CLIPDecoder))
     if loading_output.unexpected_keys:
         raise RuntimeError(f"Unexpected keys in state_dict:\n{loading_output.unexpected_keys}")
