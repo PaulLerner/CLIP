@@ -678,7 +678,7 @@ def convert_weights(model: nn.Module):
     model.apply(_convert_weights_to_fp16)
 
 
-def build_model(state_dict: dict, training=False, Class=CLIP):
+def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True):
     vit = "visual.proj" in state_dict
 
     if vit:
@@ -741,7 +741,8 @@ def build_model(state_dict: dict, training=False, Class=CLIP):
 
             # TODO also init out_proj ?
 
-    convert_weights(model)
+    if fp16:
+        convert_weights(model)
     loading_output = model.load_state_dict(state_dict, strict=not isinstance(model, CLIPDecoder))
     if loading_output.unexpected_keys:
         raise RuntimeError(f"Unexpected keys in state_dict:\n{loading_output.unexpected_keys}")

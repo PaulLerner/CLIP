@@ -124,8 +124,8 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
         state_dict = torch.load(model_path, map_location="cpu")
 
     if not jit:
-        model = build_model(state_dict or model.state_dict(), training=training, Class=Class).to(device)
-        if str(device) == "cpu" or not fp16:
+        model = build_model(state_dict or model.state_dict(), training=training, Class=Class, fp16=fp16).to(device)
+        if str(device) == "cpu":
             model.float()
         return model, _transform(model.visual.input_resolution)
     elif Class != CLIP:
@@ -150,7 +150,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     patch_device(model.encode_text)
 
     # patch dtype to float32 on CPU
-    if str(device) == "cpu" or not fp16:
+    if str(device) == "cpu":
         float_holder = torch.jit.trace(lambda: torch.ones([]).float(), example_inputs=[])
         float_input = list(float_holder.graph.findNode("aten::to").inputs())[1]
         float_node = float_input.node()
