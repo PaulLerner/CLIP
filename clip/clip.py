@@ -11,7 +11,7 @@ from PIL import Image
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
 from tqdm import tqdm
 
-from .model import build_model, CLIP
+from .model import build_model, CLIP, BlindDecoder
 from .simple_tokenizer import SimpleTokenizer as _Tokenizer, EOT_STR, SOT_STR
 
 __all__ = ["available_models", "load", "tokenize", "detokenize"]
@@ -134,6 +134,8 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
                             context_length=context_length, **kwargs).to(device)
         if str(device) == "cpu":
             model.float()
+        if Class == BlindDecoder:
+            return model, None
         return model, _transform(model.visual.input_resolution)
     elif Class != CLIP:
         raise NotImplementedError(f"Set 'jit=False' for other models than CLIP (got {Class})")

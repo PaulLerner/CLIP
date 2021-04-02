@@ -1213,7 +1213,7 @@ def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context
 
     elif isinstance(model, BlindDecoder):
         # remove irrelevant pre-trained weights (visual)
-        for weight in ['logit_scale'] + [weight for weight in state_dict.keys() if weight.startswith("visual")]:
+        for weight in ['logit_scale', 'text_projection', 'ln_final.weight', 'ln_final.bias'] + [weight for weight in state_dict.keys() if weight.startswith("visual")]:
             state_dict.pop(weight, None)
 
         # embedding matrix to classification layer
