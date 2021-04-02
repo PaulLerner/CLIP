@@ -986,7 +986,7 @@ def convert_weights(model: nn.Module):
     model.apply(_convert_weights_to_fp16)
 
 
-def build_model(state_dict: dict, training=False, Class=CLIP, context_length=None):
+def build_model(state_dict: dict, training=False, Class=CLIP, context_length=None, **kwargs):
     """
 
     Parameters
@@ -996,6 +996,7 @@ def build_model(state_dict: dict, training=False, Class=CLIP, context_length=Non
     Class: type, optional
     context_length: int, optional
         Defaults to the size of the pre-trained model (i.e. in state_dict)
+    **kwargs: additional arguments are passed to Class
 
     Returns
     -------
@@ -1038,7 +1039,8 @@ def build_model(state_dict: dict, training=False, Class=CLIP, context_length=Non
     model = Class(
         embed_dim,
         image_resolution, vision_layers, vision_width, vision_patch_size,
-        context_length, vocab_size, transformer_width, transformer_heads, transformer_layers
+        context_length, vocab_size, transformer_width, transformer_heads,
+        transformer_layers, **kwargs
     )
 
     for key in ["input_resolution", "context_length", "vocab_size"]:

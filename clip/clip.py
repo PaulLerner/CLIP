@@ -73,7 +73,7 @@ def available_models() -> List[str]:
 
 
 def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
-         jit=True, training=False, Class=CLIP, fp16=True, context_length=None):
+         jit=True, training=False, Class=CLIP, fp16=True, context_length=None, **kwargs):
     """Load a CLIP model
 
     Parameters
@@ -99,6 +99,8 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
 
     context_length: int, optional
         Defaults to the size of the pre-trained model (i.e. in state_dict)
+
+    **kwargs: additional arguments are passed to build_model
 
     Returns
     -------
@@ -127,7 +129,9 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
         state_dict = torch.load(model_path, map_location="cpu")
 
     if not jit:
-        model = build_model(state_dict or model.state_dict(), training=training, Class=Class, context_length=context_length).to(device)
+        model = build_model(state_dict or model.state_dict(),
+                            training=training, Class=Class,
+                            context_length=context_length, **kwargs).to(device)
         if str(device) == "cpu" or not fp16:
             model.float()
         return model, _transform(model.visual.input_resolution)
