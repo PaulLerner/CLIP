@@ -623,7 +623,6 @@ class BaseVisualTransformer(nn.Module):
         return x
 
 
-
 class VisualTransformer(BaseVisualTransformer):
     def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int):
         super().__init__(input_resolution, patch_size, width, layers, heads)
@@ -785,6 +784,144 @@ class CLIP(BaseCLIP):
 
         # shape = [global_batch_size, global_batch_size]
         return logits_per_image, logits_per_text
+
+
+class BlindDecoder(BaseCLIP):
+    """Blind Baseline that should be pre-trained with CLIP text decoder to generate the question. See also CLIPDecoder"""
+    def __init__(self,
+                 embed_dim: int,
+                 # vision encoder
+                 image_resolution: int,
+                 vision_layers: Union[Tuple[int, int, int, int], int],
+                 vision_width: int,
+                 vision_patch_size: int,
+                 # multimodal decoder
+                 context_length: int,
+                 vocab_size: int,
+                 transformer_width: int,
+                 transformer_heads: int,
+                 transformer_layers: int,
+                 separator: int = _tokenizer.encode("?")[0],
+                 eos: int = _tokenizer.encode(EOT_STR)[0]
+                 ):
+        """Vision parameters are silently ignored"""
+        super().__init__(context_length, vocab_size, transformer_width)
+        self.visual = None
+        self.transformer = Transformer(
+            width=transformer_width,
+            layers=transformer_layers,
+            heads=transformer_heads,
+            attn_mask=self.build_attention_mask()
+        )
+        self.linear = nn.Linear(embed_dim, vocab_size)
+        self.log_softmax = nn.LogSoftmax(-1)
+        self.separator = separator
+        self.eos = eos
+        self.initialize_parameters()
+
+    @property
+    def dtype(self):
+        """Override BaseCLIP.dtype as self.visual is None, return self.linear dtype instead"""
+        return self.linear.weight.dtype
+
+    def forward(self, input_ids, *args, **kwargs):
+        """
+        Parameters
+        ----------
+        input_ids: Tensor
+            (batch_size, context_length)
+            Beware this is the first argument unlike in CLIP and BaseCLIP
+        *args, **kwargs: additional arguments (e.g. the image) are ignored
+
+        Returns
+        -------
+        x: Tensor
+            (batch_size, context_length, embed_dim)
+        """
+        # embed text
+        x = self.token_embedding(input_ids).type(self.dtype)  # [batch_size, n_ctx, d_model]
+        x = x + self.positional_embedding.type(self.dtype)
+
+        # fix shape and pass through the blind transformer
+        x = x.permute(1, 0, 2)  # NLD -> LND
+        x = self.transformer(x)
+        x = x.permute(1, 0, 2)  # LND -> NLD
+
+        # predict the next token
+        x = self.linear(x)
+        return self.log_softmax(x)
+
+    def generate(self, input_ids, *args, **kwargs):
+        """
+        Ignores additional arguments.
+        Disables gradient calculation.
+        Returns Greedy decoding.
+        """
+        with torch.no_grad():
+            return self.greedy_decoding(input_ids)
+
+    def greedy_decoding(self, input_ids):
+        """see forward"""
+        # find separator ("?") in the input
+        batch_size = input_ids.shape[0]
+        max_index_batch = torch.full((batch_size,), self.context_length - 1, device=input_ids.device)
+        where = input_ids == self.separator
+        nonzero = where.nonzero(as_tuple=False)
+        # no separator in the batch
+        if not where.any():
+            first_where = torch.zeros(batch_size, dtype=torch.long, device=input_ids.device)
+        # exactly one separator per item in the batch
+        elif nonzero.shape[0] == batch_size and nonzero[:, 0].unique().shape[0] == batch_size:
+            first_where = nonzero[:, 1]
+        # multiple separators per item in the batch -> keep only the first one
+        else:
+            first_where = []
+            for item in where:
+                nonzero = item.nonzero(as_tuple=False)
+                if nonzero.shape[0] == 0:
+                    first_where.append(torch.zeros((1,), dtype=torch.long, device=input_ids.device))
+                else:
+                    first_where.append(nonzero[0])
+            first_where = torch.cat(first_where, axis=0)
+        first_where = first_where.minimum(max_index_batch)
+
+        # embed text
+        token_embeddings = self.token_embedding(input_ids).type(self.dtype)  # [batch_size, n_ctx, d_model]
+        question = token_embeddings + self.positional_embedding.type(self.dtype)
+
+        # fix shape and pass through the blind transformer
+        question = question.permute(1, 0, 2)  # NLD -> LND
+        question = self.transformer(question)
+        question = question.permute(1, 0, 2)  # LND -> NLD
+
+        # predict the next token
+        question = self.linear(question)
+        prediction = question.argmax(-1)
+
+        # did we predict EOS ?
+        answer = prediction[:, first_where]
+        reached_eos = answer == self.eos
+        first_where = (first_where + 1).minimum(max_index_batch)
+
+        # sequential decoding until max_length or eos (update input w.r.t prediction)
+        while not torch.logical_or((first_where == max_index_batch), reached_eos).all():
+            token_embeddings[:, first_where] = self.token_embedding(answer).type(self.dtype)
+            question = token_embeddings + self.positional_embedding.type(self.dtype)
+            question = question.permute(1, 0, 2)  # NLD -> LND
+            # TODO: cache previous hidden-states instead of recomputing every time
+            question = self.transformer(question)
+            question = question.permute(1, 0, 2)  # LND -> NLD
+
+            # predict the next token
+            question = self.linear(question)
+            prediction = question.argmax(-1)
+
+            # did we predict EOS ? (previously OR at this step)
+            answer = prediction[:, first_where]
+            reached_eos = torch.logical_or(reached_eos, answer == self.eos)
+            first_where = (first_where + 1).minimum(max_index_batch)
+
+        return self.log_softmax(question)
 
 
 class CLIPDecoder(BaseCLIP):
@@ -1048,7 +1185,7 @@ def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context
         if key in state_dict:
             del state_dict[key]
 
-    # map pre-trained weights to CLIPDecoder
+    # map pre-trained weights to fine-tuned model
     if isinstance(model, CLIPDecoder):
         # remove irrelevant pre-trained weights
         for weight in ['logit_scale', 'visual.ln_post.bias', 'visual.ln_post.weight']:
@@ -1074,10 +1211,17 @@ def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context
             state_dict[f"transformer.resblocks.{i}.ln_cross_attn.bias"] = ln_final_bias
             state_dict[f"transformer.resblocks.{i}.ln_cross_attn.weight"] = ln_final_weight
 
+    elif isinstance(model, BlindDecoder):
+        # remove irrelevant pre-trained weights (visual)
+        for weight in ['logit_scale'] + [weight for weight in state_dict.keys() if weight.startswith("visual")]:
+            state_dict.pop(weight, None)
+
+        # embedding matrix to classification layer
+        state_dict["linear.weight"] = state_dict["token_embedding.weight"]
 
     if fp16:
         convert_weights(model)
-    loading_output = model.load_state_dict(state_dict, strict=not isinstance(model, CLIPDecoder))
+    loading_output = model.load_state_dict(state_dict, strict=not isinstance(model, (CLIPDecoder, BlindDecoder)))
     if loading_output.unexpected_keys:
         raise RuntimeError(f"Unexpected keys in state_dict:\n{loading_output.unexpected_keys}")
     if loading_output.missing_keys:
