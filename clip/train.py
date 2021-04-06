@@ -165,8 +165,8 @@ def compute_metrics(pred_and_label):
     """
     predictions = pred_and_label.predictions
     labels = pred_and_label.label_ids
-    predictions = np.asarray(list(detokenize(predictions, answer_only=True)), dtype=str)
-    labels = np.asarray(list(detokenize(labels, answer_only=True)), dtype=str)
+    predictions = np.asarray(list(detokenize(predictions, answer_only=True, clean_up_tokenization_spaces=True)), dtype=str)
+    labels = np.asarray(list(detokenize(labels, answer_only=True, clean_up_tokenization_spaces=True)), dtype=str)
     accuracy = (predictions == labels).mean()
     return dict(accuracy=accuracy)
 

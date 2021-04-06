@@ -233,7 +233,7 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt:
 def detokenize(inp: np.ndarray,
                remove_special_tokens: bool = True,
                answer_only: bool = False,
-               ignore_index: int = -100) -> List[str]:
+               clean_up_tokenization_spaces=False) -> List[str]:
     """
     Yields the string representation of the input tokens (one str per item Tensor in the batch)
 
@@ -246,6 +246,8 @@ def detokenize(inp: np.ndarray,
     answer_only : bool, optional
         overrides remove_special_tokens: keep only what's in between "?" and EOT_STR
         Defaults to False
+    clean_up_tokenization_spaces: bool, optional
+        Remove spaces added during tokenization, e.g. in abbreviations, before punctuation
 
     Yields
     ------
@@ -255,7 +257,7 @@ def detokenize(inp: np.ndarray,
     inp[inp<0] = 0
 
     for tokens in inp:
-        text = _tokenizer.decode(tokens)
+        text = _tokenizer.decode(tokens, clean_up_tokenization_spaces=clean_up_tokenization_spaces)
         if answer_only or remove_special_tokens:
             if answer_only:
                 start = text.find("?") + 1

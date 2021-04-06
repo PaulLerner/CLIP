@@ -80,6 +80,10 @@ class SimpleTokenizer(object):
         self.bpe_ranks = dict(zip(merges, range(len(merges))))
         self.cache = {'<|startoftext|>': '<|startoftext|>', '<|endoftext|>': '<|endoftext|>'}
         self.pat = re.compile(r"""<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+""", re.IGNORECASE)
+        # same as self.pat except for "<\|startoftext\|>|<\|endoftext\|>|[\p{L}]+|[\p{N}]"
+        self.pat_spaces = re.compile(r"""(\s+)('s|'t|'re|'ve|'m|'ll|'d|[^\s\p{L}\p{N}]+)""", re.IGNORECASE)
+        self.spaces_between_digits = re.compile(r"(\d)\s+(\d)")
+        self.spaces_between_time = re.compile(r"(\d:)\s+(\d)")
 
     def bpe(self, token):
         if token in self.cache:
@@ -130,7 +134,19 @@ class SimpleTokenizer(object):
             bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(' '))
         return bpe_tokens
 
-    def decode(self, tokens):
+    def clean_up_tokenization(self, text):
+        # remove space before abbreviation (e.g. "I 'll" -> "I'll")
+        text = re.sub(self.pat_spaces, r"\2", text)
+        # between digits, e.g. "1 2" -> "12"
+        text = re.sub(self.spaces_between_digits, r"\1\2", text)
+        # between time, e.g. "11: 10" -> "11:10"
+        text = re.sub(self.spaces_between_time, r"\1\2", text)
+
+        return text
+
+    def decode(self, tokens, clean_up_tokenization_spaces=False):
         text = ''.join([self.decoder[token] for token in tokens])
         text = bytearray([self.byte_decoder[c] for c in text]).decode('utf-8', errors="replace").replace('</w>', ' ')
+        if clean_up_tokenization_spaces:
+            text = self.clean_up_tokenization(text)
         return text
