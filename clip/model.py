@@ -585,7 +585,17 @@ class CLIPDecoder(BaseCLIP):
             return self.greedy_decoding(input_ids, image)
 
     def greedy_decoding(self, input_ids, image):
-        """see forward"""
+        """
+        Parameters
+        ----------
+        see forward
+
+        Returns
+        -------
+        prediction: Tensor
+            (batch_size, context_length)
+            Same as input after predicting the answer
+        """
         # find separator ("?") in the input
         batch_size = input_ids.shape[0]
         max_index_batch = torch.full((batch_size,), self.context_length - 1, device=input_ids.device)
@@ -593,12 +603,14 @@ class CLIPDecoder(BaseCLIP):
         nonzero = where.nonzero(as_tuple=False)
         # no separator in the batch
         if not where.any():
+            raise ValueError(f"didn't find the separator '{self.separator}' in the batch:\n{where}")
             first_where = torch.zeros(batch_size, dtype=torch.long, device=input_ids.device)
-        # exactly one separator per item in the batch
+        # exactly one separator per item in the batch (this should always be the case)
         elif nonzero.shape[0] == batch_size and nonzero[:, 0].unique().shape[0] == batch_size:
             first_where = nonzero[:, 1]
         # multiple separators per item in the batch -> keep only the first one
         else:
+            raise ValueError(f"multiple separators '{self.separator}' in the batch:\n{where}")
             first_where = []
             for item in where:
                 nonzero = item.nonzero(as_tuple=False)
@@ -624,13 +636,14 @@ class CLIPDecoder(BaseCLIP):
         question = question.permute(1, 0, 2)  # LND -> NLD
 
         # predict the next token
+        prediction = input_ids
         question = self.linear(question)
-        prediction = question.argmax(-1)
+        answer = question[:, first_where].argmax(-1)
 
         # did we predict EOS ?
-        answer = prediction[:, first_where]
         reached_eos = answer == self.eos
         first_where = (first_where + 1).minimum(max_index_batch)
+        prediction[:, first_where] = answer
 
         # sequential decoding until max_length or eos (update input w.r.t prediction)
         while not torch.logical_or((first_where == max_index_batch), reached_eos).all():
@@ -644,14 +657,14 @@ class CLIPDecoder(BaseCLIP):
 
             # predict the next token
             question = self.linear(question)
-            prediction = question.argmax(-1)
+            answer = question[:, first_where].argmax(-1)
 
             # did we predict EOS ? (previously OR at this step)
-            answer = prediction[:, first_where]
             reached_eos = torch.logical_or(reached_eos, answer == self.eos)
             first_where = (first_where + 1).minimum(max_index_batch)
+            prediction[:, first_where] = answer
 
-        return self.log_softmax(question)
+        return prediction
 
 
 def convert_weights(model: nn.Module):

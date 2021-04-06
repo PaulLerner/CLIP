@@ -91,7 +91,7 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
         image_path = images_path / JPG_FORMAT.format(subset=subset, image_id=question['image_id'])
 
         # remove all punctuations marks in the question except for the final one
-        norm_question = question['question'].strip().replace("?", "") + "?"
+        norm_question = question['question'].strip().replace("?", "") + " ?"
         if annotations is not None:
             # lowercase, strip whitespaces and remove all punctuations marks in the answer
             answers = Counter(answer['answer'].lower().strip().replace("?", "") for answer in annotation['answers'])

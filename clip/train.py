@@ -130,12 +130,8 @@ class Learner(nn.Module):
     def generate(self, *args, **kwargs):
         """
         Pass all arguments to self.model.generate
-        Applies argmax to the last dimension of the model output to save memory
-        (see https://github.com/huggingface/transformers/issues/10722)
-
-        Beware this might break your code as it's not the expected behaviour in transformers Trainer
         """
-        return self.model.generate(*args, **kwargs).argmax(-1)
+        return self.model.generate(*args, **kwargs)
 
 
 class LanguageModel(Learner):
