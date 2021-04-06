@@ -83,7 +83,7 @@ class SimpleTokenizer(object):
         # same as self.pat except for "<\|startoftext\|>|<\|endoftext\|>|[\p{L}]+|[\p{N}]"
         self.pat_spaces = re.compile(r"""(\s+)('s|'t|'re|'ve|'m|'ll|'d|[^\s\p{L}\p{N}]+)""", re.IGNORECASE)
         self.spaces_between_digits = re.compile(r"(\d)\s+(\d)")
-        self.spaces_between_time = re.compile(r"(\d:)\s+(\d)")
+        self.spaces_between_time = re.compile(r"(\d[:\/\-\.])\s+(\d)")
 
     def bpe(self, token):
         if token in self.cache:
@@ -139,7 +139,9 @@ class SimpleTokenizer(object):
         text = re.sub(self.pat_spaces, r"\2", text)
         # between digits, e.g. "1 2" -> "12"
         text = re.sub(self.spaces_between_digits, r"\1\2", text)
-        # between time, e.g. "11: 10" -> "11:10"
+        # HACK: do it twice to handle long numbers, e.g. "2 0 1 7" -> "20 17" -> "2017"
+        text = re.sub(self.spaces_between_digits, r"\1\2", text)
+        # between time, e.g. "11: 10" -> "11:10", "11/ 10" -> "11/10"
         text = re.sub(self.spaces_between_time, r"\1\2", text)
 
         return text
