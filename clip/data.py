@@ -2,15 +2,46 @@ from pathlib import Path
 import json
 from PIL import Image
 from collections import Counter
-from torch.utils.data import Dataset
 import random
 from tqdm import tqdm
+from dataclasses import dataclass
+
+import torch
+from torch.utils.data import Dataset
 
 from clip import tokenize
+
 
 JPG_FORMAT = "COCO_{subset}_{image_id:012d}.jpg"
 
 
+def collate_batch(features):
+    """
+    Take a list of samples from a Dataset and collate them into a batch.
+    Adapted from transformers DefaultDataCollator but keeps str in the batch
+
+    Returns:
+        A dictionary of tensors
+    """
+    # In this method we'll make the assumption that all `features` in the batch
+    # have the same attributes.
+    # So we will look at the first element as a proxy for what attributes exist
+    # on the whole batch.
+    first = features[0]
+     
+    batch = {}
+
+    for k, v in first.items():
+        if v is not None:
+            # concatenate the tensors
+            if isinstance(v, torch.Tensor):
+                batch[k] = torch.cat([f[k].unsqueeze(0) for f in features])
+            else:
+                batch[k] = [f[k] for f in features]
+
+    return batch
+        
+         
 class VQADataset(Dataset):
     def __init__(self, data, image_preprocess):
         self.data = data
@@ -109,9 +140,10 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
                 inp, tgt = tokenize(text, context_length=context_length, return_tgt=True)
         # test setting: answers are only available on the private server
         else:
+            answer = None
             inp, tgt = tokenize(norm_question, context_length=context_length, return_tgt=True)
 
-        data.append(dict(input_ids=inp[0], labels=tgt[0], image_path=image_path, attention_mask=None))
+        data.append(dict(input_ids=inp[0], labels=tgt[0], image_path=image_path, answer=answer, question_id=question['question_id'], attention_mask=None))
 
     dataset = VQADataset(data, image_preprocess)
     print(f"Done! Total dataset size: {len(dataset)}")

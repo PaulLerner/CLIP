@@ -849,7 +849,7 @@ class CLIPDecoder(BaseCLIP):
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))
 
-    def forward(self, input_ids, image):
+    def forward(self, input_ids, image, **kwargs):
         """
         Parameters
         ----------
@@ -859,6 +859,7 @@ class CLIPDecoder(BaseCLIP):
         image: Tensor
             (batch_size, in_channels, height, width)
             Beware this is the second argument unlike in CLIP and BaseCLIP
+        **kwargs: additionnal arguments (e.g. strings) are ignored
 
         Returns
         -------

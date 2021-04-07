@@ -21,7 +21,7 @@ if version.parse(torch.__version__) >= version.parse("1.6"):
 
 from .clip import load, detokenize
 import clip.model
-from .data import get_datasets
+from .data import get_datasets, collate_batch
 
 
 logging.basicConfig()
@@ -165,8 +165,8 @@ def compute_metrics(pred_and_label):
     """
     predictions = pred_and_label.predictions
     labels = pred_and_label.label_ids
-    predictions = np.asarray(list(detokenize(predictions, answer_only=True, clean_up_tokenization_spaces=True)), dtype=str)
-    labels = np.asarray(list(detokenize(labels, answer_only=True, clean_up_tokenization_spaces=True)), dtype=str)
+    predictions = np.asarray(list(detokenize(predictions, answer_only=True)), dtype=str)
+    labels = np.asarray(list(detokenize(labels, answer_only=True)), dtype=str)
     accuracy = (predictions == labels).mean()
     return dict(accuracy=accuracy)
 
@@ -198,7 +198,7 @@ def instantiate_trainer(config):
     LearnerClass = getattr(sys.modules[__name__], learner_args.pop("Class", "LanguageModel"))
     learner = LearnerClass(model, criterion)
     training_args = Seq2SeqTrainingArguments(**config.get("training", {}))
-    trainer = CLIPTrainer(model=learner, args=training_args,
+    trainer = CLIPTrainer(model=learner, args=training_args, data_collator=collate_batch,
                           train_dataset=train_dataset, eval_dataset=eval_dataset,
                           compute_metrics=compute_metrics)
     return trainer, training_args, config
