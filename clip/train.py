@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from packaging import version
 import logging
 from tqdm import tqdm
+import collections
 
 import numpy as np
 
@@ -16,6 +17,8 @@ from transformers.file_utils import WEIGHTS_NAME
 import torch
 from torch import nn
 from torch.autograd import set_detect_anomaly
+from torch.utils.data.dataloader import DataLoader
+
 if version.parse(torch.__version__) >= version.parse("1.6"):
     from torch.cuda.amp import autocast
 
@@ -40,6 +43,58 @@ class CLIPTrainer(Seq2SeqTrainer):
             device = f"cuda:{i}"
             logs[f"max_memory_{device}"] = torch.cuda.max_memory_allocated(device)
         return super().log(logs)
+
+    def predict_and_save(
+        self,
+        dataloader: DataLoader,
+        description: str,
+        prediction_loss_only: Optional[bool] = None,
+        ignore_keys: Optional[List[str]] = None,
+        metric_key_prefix: str = "eval",
+    ) -> List[Dict]:
+        """
+        Saves de-tokenized predictions along with question ID
+        Adapted from prediction_loop (but doesn't compute metrics)
+        Not implemented for distributed setting
+        """
+        if not isinstance(dataloader.dataset, collections.abc.Sized):
+            raise ValueError("dataset must implement __len__")
+        prediction_loss_only = (
+            prediction_loss_only if prediction_loss_only is not None else self.args.prediction_loss_only
+        )
+
+        model = self.model
+        # multi-gpu eval
+        if self.args.n_gpu > 1:
+            model = torch.nn.DataParallel(model)
+
+        batch_size = dataloader.batch_size
+        num_examples = self.num_examples(dataloader)
+        logger.info("***** Running %s *****", description)
+        logger.info("  Num examples = %d", num_examples)
+        logger.info("  Batch size = %d", batch_size)
+
+        model.eval()
+
+        if self.args.past_index >= 0:
+            self._past = None
+
+        self.callback_handler.eval_dataloader = dataloader
+
+        answers = []
+        for step, inputs in enumerate(dataloader):
+            _, preds, _ = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
+            # tensor to numpy to List[str]
+            preds = detokenize(preds.cpu().numpy(), answer_only=True, clean_up_tokenization_spaces=True)
+            for pred, question_id in zip(preds, inputs['question_id']):
+                answers.append(dict(answer=pred, question_id=question_id))
+            self.control = self.callback_handler.on_prediction_step(self.args, self.state, self.control)
+
+        if self.args.past_index and hasattr(self, "_past"):
+            # Clean the state at the end of the evaluation loop
+            delattr(self, "_past")
+
+        return answers
 
     def prediction_step(
         self,
@@ -219,6 +274,11 @@ def write_metrics(metrics, resume_from_checkpoint):
         json.dump(metrics, file)
 
 
+def write_answers(answers, resume_from_checkpoint):
+    with open(resume_from_checkpoint/"answers.json", "w") as file:
+        json.dump(answers, file)
+
+
 def main():
     # load and parse arguments
     args = docopt(__doc__)
@@ -232,7 +292,7 @@ def main():
         trainer.train(**checkpoint)
     elif training_args.do_eval:
         resume_from_checkpoints = get_checkpoint(**checkpoint)
-        for resume_from_checkpoint in tqdm(resume_from_checkpoints, desc="Evaluating"):
+        for resume_from_checkpoint in tqdm(resume_from_checkpoints, desc="Evaluation"):
             # load state dict
             state_dict = torch.load(resume_from_checkpoint / WEIGHTS_NAME)
             trainer.model.load_state_dict(state_dict)
@@ -245,7 +305,16 @@ def main():
             metrics = trainer.evaluate()
             write_metrics(metrics, resume_from_checkpoint)
     elif training_args.do_predict:
-        raise NotImplementedError()
+        resume_from_checkpoints = get_checkpoint(**checkpoint)
+        for resume_from_checkpoint in tqdm(resume_from_checkpoints, desc="Prediction"):
+            # load state dict
+            state_dict = torch.load(resume_from_checkpoint / WEIGHTS_NAME)
+            trainer.model.load_state_dict(state_dict)
+
+            # run model on evaluation dataset
+            eval_dataloader = trainer.get_eval_dataloader()
+            answers = trainer.predict_and_save(eval_dataloader, description="Prediction")
+            write_answers(answers, resume_from_checkpoint)
     else:
         logger.warning("Did nothing except instantiate the trainer, "
                        "you probably want to set do_train, do_eval or do_predict to True"
