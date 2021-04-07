@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import torch
 from torch.utils.data import Dataset
 
-from clip import tokenize
+from clip import tokenize_qa
 
 
 JPG_FORMAT = "COCO_{subset}_{image_id:012d}.jpg"
@@ -58,7 +58,7 @@ class VQADataset(Dataset):
 
 
 def get_dataset(image_preprocess, subset, images_path, questions_path, annotations_path=None,
-                gt_threshold=3, data_ratio=1.0, context_length=77, eval=False):
+                gt_threshold=3, data_ratio=1.0, context_length=77, eval=False, mask_question=False):
     """
 
     Parameters
@@ -85,6 +85,9 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
     eval : bool, optional
         Whether to add answer (when available) to the input (default)
         Has no effect on labels/target
+    mask_question : bool, optional
+        Whether to pad the question or not (default) in the target
+        i.e. train the model to predict both the question and the answer or only the answer
 
     Returns
     -------
@@ -130,20 +133,19 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
             # skip question if there is so little agreement between annotators that the most common answer is below threshold
             if count < gt_threshold:
                 continue
-            text = norm_question + " " + answer
             # validation setting: remove answer from input to avoid bias in evaluation
             if eval:
-                inp = tokenize(norm_question, context_length=context_length)
-                _, tgt = tokenize(text, context_length=context_length, return_tgt=True)
+                inp, _ = tokenize_qa(norm_question, "", context_length=context_length, mask_question=mask_question)
+                _, tgt = tokenize_qa(norm_question, answer, context_length=context_length, mask_question=mask_question)
             # train setting: leave answer in the input to allow for teacher forcing
             else:
-                inp, tgt = tokenize(text, context_length=context_length, return_tgt=True)
+                inp, tgt = tokenize_qa(norm_question, answer, context_length=context_length, mask_question=mask_question)
         # test setting: answers are only available on the private server
         else:
             answer = None
-            inp, tgt = tokenize(norm_question, context_length=context_length, return_tgt=True)
+            inp, tgt = tokenize_qa(norm_question, "", context_length=context_length, mask_question=mask_question)
 
-        data.append(dict(input_ids=inp[0], labels=tgt[0], image_path=image_path, answer=answer, question_id=question['question_id'], attention_mask=None))
+        data.append(dict(input_ids=inp, labels=tgt, image_path=image_path, answer=answer, question_id=question['question_id'], attention_mask=None))
 
     dataset = VQADataset(data, image_preprocess)
     print(f"Done! Total dataset size: {len(dataset)}")

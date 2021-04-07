@@ -183,6 +183,48 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     return model, _transform(model.input_resolution.item())
 
 
+def tokenize_qa(question: str, answer: str, context_length: int = 77, mask_question: bool = False) -> Tuple[torch.LongTensor]:
+    """
+    Parameters
+    ----------
+    question, answer: str
+        Both will be tokenized and concatenated in inp
+    context_length: int, optional
+        The context length to use; all CLIP models use 77 as the context length
+    mask_question: bool, optional
+        Whether to pad the question or not (default) in the target
+        i.e. train the model to predict both the question and the answer or only the answer
+
+    Returns
+    -------
+    inp : Tensor
+        (context_length, )
+    tgt : Tensor
+        (context_length, )
+    """
+    sot_token = _tokenizer.encoder[SOT_STR]
+    eot_token = _tokenizer.encoder[EOT_STR]
+    question_tokens = [sot_token] + _tokenizer.encode(question)
+    answer_tokens = _tokenizer.encode(answer) + [eot_token]
+    all_tokens = question_tokens + answer_tokens
+    inp = torch.zeros(context_length, dtype=torch.long)
+    tgt = torch.full_like(inp, -100)
+
+    if len(all_tokens) > context_length:
+        raise RuntimeError(f"Input {question+answer} is too long for context length {context_length}")
+
+    tokens_tensor = torch.tensor(all_tokens)
+    inp[: len(all_tokens)] = tokens_tensor
+
+    # keep only the answer in the target
+    if mask_question:
+        tgt[len(question_tokens): len(all_tokens)] = torch.tensor(answer_tokens)
+    else:
+        tgt[: len(all_tokens)] = tokens_tensor
+
+    return inp, tgt
+
+
 def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt: bool = False) -> Tuple[torch.LongTensor]:
     """
     Returns the tokenized representation of the input string(s)
