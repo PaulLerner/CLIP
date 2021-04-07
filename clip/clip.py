@@ -14,7 +14,7 @@ from tqdm import tqdm
 from .model import build_model, CLIP
 from .simple_tokenizer import SimpleTokenizer as _Tokenizer, EOT_STR, SOT_STR
 
-__all__ = ["available_models", "load", "tokenize", "detokenize"]
+__all__ = ["available_models", "load", "tokenize", "tokenize_qa", "detokenize"]
 _tokenizer = _Tokenizer()
 
 _MODELS = {
