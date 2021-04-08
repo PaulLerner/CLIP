@@ -18,7 +18,8 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "clip-train=clip.train:main"
+            "clip-train=clip.train:main",
+            "clip-visualize=clip.visualize:main"
         ]
     },
     include_package_data=True,
