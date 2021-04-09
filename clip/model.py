@@ -909,25 +909,17 @@ class CLIPDecoder(BaseCLIP):
         batch_size = input_ids.shape[0]
         max_index_batch = torch.full((batch_size,), self.context_length - 1, device=input_ids.device)
         where = input_ids == self.separator
-        nonzero = where.nonzero(as_tuple=False)
+        nonzero = where.nonzero(as_tuple=True)
         # no separator in the batch
         if not where.any():
             raise ValueError(f"didn't find the separator '{self.separator}' in the batch:\n{where}")
-            first_where = torch.zeros(batch_size, dtype=torch.long, device=input_ids.device)
         # exactly one separator per item in the batch (this should always be the case)
-        elif nonzero.shape[0] == batch_size and nonzero[:, 0].unique().shape[0] == batch_size:
-            first_where = nonzero[:, 1]
-        # multiple separators per item in the batch -> keep only the first one
+        elif nonzero[0].shape[0] == batch_size and nonzero[0].unique().shape[0] == batch_size:
+            first_where = nonzero[1]
+            all_items = nonzero[0]
+        # multiple separators per item in the batch
         else:
             raise ValueError(f"multiple separators '{self.separator}' in the batch:\n{where}")
-            first_where = []
-            for item in where:
-                nonzero = item.nonzero(as_tuple=False)
-                if nonzero.shape[0] == 0:
-                    first_where.append(torch.zeros((1,), dtype=torch.long, device=input_ids.device))
-                else:
-                    first_where.append(nonzero[0])
-            first_where = torch.cat(first_where, axis=0)
         first_where = first_where.minimum(max_index_batch)
 
         # encode image with visual encoder
@@ -947,16 +939,16 @@ class CLIPDecoder(BaseCLIP):
         # predict the next token
         prediction = input_ids
         question = self.linear(question)
-        answer = question[:, first_where].argmax(-1)
+        answer = question[all_items, first_where].argmax(-1)
 
         # did we predict EOS ?
         reached_eos = answer == self.eos
         first_where = (first_where + 1).minimum(max_index_batch)
-        prediction[:, first_where] = answer
+        prediction[all_items, first_where] = answer
 
         # sequential decoding until max_length or eos (update input w.r.t prediction)
         while not torch.logical_or((first_where == max_index_batch), reached_eos).all():
-            token_embeddings[:, first_where] = self.token_embedding(answer).type(self.dtype)
+            token_embeddings[all_items, first_where] = self.token_embedding(answer).type(self.dtype)
             question = token_embeddings + self.positional_embedding.type(self.dtype)
             question = question.permute(1, 0, 2)  # NLD -> LND
             # TODO: cache previous hidden-states instead of recomputing every time
@@ -966,12 +958,12 @@ class CLIPDecoder(BaseCLIP):
 
             # predict the next token
             question = self.linear(question)
-            answer = question[:, first_where].argmax(-1)
+            answer = question[all_items, first_where].argmax(-1)
 
             # did we predict EOS ? (previously OR at this step)
             reached_eos = torch.logical_or(reached_eos, answer == self.eos)
             first_where = (first_where + 1).minimum(max_index_batch)
-            prediction[:, first_where] = answer
+            prediction[all_items, first_where] = answer
 
         return prediction
 
