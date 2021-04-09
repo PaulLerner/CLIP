@@ -2,15 +2,46 @@ from pathlib import Path
 import json
 from PIL import Image
 from collections import Counter
-from torch.utils.data import Dataset
 import random
 from tqdm import tqdm
+from dataclasses import dataclass
 
-from clip import tokenize
+import torch
+from torch.utils.data import Dataset
+
+from clip import tokenize_qa
+
 
 JPG_FORMAT = "COCO_{subset}_{image_id:012d}.jpg"
 
 
+def collate_batch(features):
+    """
+    Take a list of samples from a Dataset and collate them into a batch.
+    Adapted from transformers DefaultDataCollator but keeps str in the batch
+
+    Returns:
+        A dictionary of tensors
+    """
+    # In this method we'll make the assumption that all `features` in the batch
+    # have the same attributes.
+    # So we will look at the first element as a proxy for what attributes exist
+    # on the whole batch.
+    first = features[0]
+     
+    batch = {}
+
+    for k, v in first.items():
+        if v is not None:
+            # concatenate the tensors
+            if isinstance(v, torch.Tensor):
+                batch[k] = torch.cat([f[k].unsqueeze(0) for f in features])
+            else:
+                batch[k] = [f[k] for f in features]
+
+    return batch
+        
+         
 class VQADataset(Dataset):
     def __init__(self, data, image_preprocess):
         self.data = data
@@ -27,7 +58,7 @@ class VQADataset(Dataset):
 
 
 def get_dataset(image_preprocess, subset, images_path, questions_path, annotations_path=None,
-                gt_threshold=3, data_ratio=1.0, context_length=77, eval=False):
+                gt_threshold=3, data_ratio=1.0, context_length=77, eval=False, mask_question=False):
     """
 
     Parameters
@@ -54,6 +85,9 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
     eval : bool, optional
         Whether to add answer (when available) to the input (default)
         Has no effect on labels/target
+    mask_question : bool, optional
+        Whether to pad the question or not (default) in the target
+        i.e. train the model to predict both the question and the answer or only the answer
 
     Returns
     -------
@@ -91,7 +125,7 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
         image_path = images_path / JPG_FORMAT.format(subset=subset, image_id=question['image_id'])
 
         # remove all punctuations marks in the question except for the final one
-        norm_question = question['question'].strip().replace("?", "") + "?"
+        norm_question = question['question'].strip().replace("?", "") + " ?"
         if annotations is not None:
             # lowercase, strip whitespaces and remove all punctuations marks in the answer
             answers = Counter(answer['answer'].lower().strip().replace("?", "") for answer in annotation['answers'])
@@ -99,19 +133,19 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
             # skip question if there is so little agreement between annotators that the most common answer is below threshold
             if count < gt_threshold:
                 continue
-            text = norm_question + " " + answer
             # validation setting: remove answer from input to avoid bias in evaluation
             if eval:
-                inp = tokenize(norm_question, context_length=context_length)
-                _, tgt = tokenize(text, context_length=context_length, return_tgt=True)
+                inp, _ = tokenize_qa(norm_question, "", context_length=context_length, mask_question=mask_question)
+                _, tgt = tokenize_qa(norm_question, answer, context_length=context_length, mask_question=mask_question)
             # train setting: leave answer in the input to allow for teacher forcing
             else:
-                inp, tgt = tokenize(text, context_length=context_length, return_tgt=True)
+                inp, tgt = tokenize_qa(norm_question, answer, context_length=context_length, mask_question=mask_question)
         # test setting: answers are only available on the private server
         else:
-            inp, tgt = tokenize(norm_question, context_length=context_length, return_tgt=True)
+            answer = None
+            inp, tgt = tokenize_qa(norm_question, "", context_length=context_length, mask_question=mask_question)
 
-        data.append(dict(input_ids=inp[0], labels=tgt[0], image_path=image_path, attention_mask=None))
+        data.append(dict(input_ids=inp, labels=tgt, image_path=image_path, answer=answer, question_id=question['question_id'], attention_mask=None))
 
     dataset = VQADataset(data, image_preprocess)
     print(f"Done! Total dataset size: {len(dataset)}")

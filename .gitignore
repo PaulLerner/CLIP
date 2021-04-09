@@ -11,6 +11,7 @@ thumbs.db
 
 # local data
 drafts/
+data/
 
 # Visual Studio Code stuff
 .vscode/

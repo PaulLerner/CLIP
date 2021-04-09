@@ -14,7 +14,7 @@ from tqdm import tqdm
 from .model import build_model, CLIP
 from .simple_tokenizer import SimpleTokenizer as _Tokenizer, EOT_STR, SOT_STR
 
-__all__ = ["available_models", "load", "tokenize", "detokenize"]
+__all__ = ["available_models", "load", "tokenize", "tokenize_qa", "detokenize"]
 _tokenizer = _Tokenizer()
 
 _MODELS = {
@@ -183,6 +183,48 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     return model, _transform(model.input_resolution.item())
 
 
+def tokenize_qa(question: str, answer: str, context_length: int = 77, mask_question: bool = False) -> Tuple[torch.LongTensor]:
+    """
+    Parameters
+    ----------
+    question, answer: str
+        Both will be tokenized and concatenated in inp
+    context_length: int, optional
+        The context length to use; all CLIP models use 77 as the context length
+    mask_question: bool, optional
+        Whether to pad the question or not (default) in the target
+        i.e. train the model to predict both the question and the answer or only the answer
+
+    Returns
+    -------
+    inp : Tensor
+        (context_length, )
+    tgt : Tensor
+        (context_length, )
+    """
+    sot_token = _tokenizer.encoder[SOT_STR]
+    eot_token = _tokenizer.encoder[EOT_STR]
+    question_tokens = [sot_token] + _tokenizer.encode(question)
+    answer_tokens = _tokenizer.encode(answer) + [eot_token]
+    all_tokens = question_tokens + answer_tokens
+    inp = torch.zeros(context_length, dtype=torch.long)
+    tgt = torch.full_like(inp, -100)
+
+    if len(all_tokens) > context_length:
+        raise RuntimeError(f"Input {question+answer} is too long for context length {context_length}")
+
+    tokens_tensor = torch.tensor(all_tokens)
+    inp[: len(all_tokens)] = tokens_tensor
+
+    # keep only the answer in the target
+    if mask_question:
+        tgt[len(question_tokens): len(all_tokens)] = torch.tensor(answer_tokens)
+    else:
+        tgt[: len(all_tokens)] = tokens_tensor
+
+    return inp, tgt
+
+
 def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt: bool = False) -> Tuple[torch.LongTensor]:
     """
     Returns the tokenized representation of the input string(s)
@@ -233,7 +275,7 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, return_tgt:
 def detokenize(inp: np.ndarray,
                remove_special_tokens: bool = True,
                answer_only: bool = False,
-               ignore_index: int = -100) -> List[str]:
+               clean_up_tokenization_spaces=False) -> List[str]:
     """
     Yields the string representation of the input tokens (one str per item Tensor in the batch)
 
@@ -246,6 +288,8 @@ def detokenize(inp: np.ndarray,
     answer_only : bool, optional
         overrides remove_special_tokens: keep only what's in between "?" and EOT_STR
         Defaults to False
+    clean_up_tokenization_spaces: bool, optional
+        Remove spaces added during tokenization, e.g. in abbreviations, before punctuation
 
     Yields
     ------
@@ -255,7 +299,7 @@ def detokenize(inp: np.ndarray,
     inp[inp<0] = 0
 
     for tokens in inp:
-        text = _tokenizer.decode(tokens)
+        text = _tokenizer.decode(tokens, clean_up_tokenization_spaces=clean_up_tokenization_spaces)
         if answer_only or remove_special_tokens:
             if answer_only:
                 start = text.find("?") + 1
