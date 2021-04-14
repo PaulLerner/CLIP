@@ -1083,10 +1083,6 @@ def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context
             state_dict[f"transformer.resblocks.{i}.ln_cross_attn.bias"] = ln_final_bias
             state_dict[f"transformer.resblocks.{i}.ln_cross_attn.weight"] = ln_final_weight
 
-
-    if fp16:
-        convert_weights(model)
-        
     if pretrained:
         loading_output = model.load_state_dict(state_dict, strict=not isinstance(model, CLIPDecoder))
         if loading_output.unexpected_keys:
@@ -1094,4 +1090,7 @@ def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context
         if loading_output.missing_keys:
             print(f"The following keys were not loaded from state_dict:\n{loading_output.missing_keys}")
 
+    if fp16:
+        convert_weights(model)
+        
     return model.train(training)
