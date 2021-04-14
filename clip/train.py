@@ -294,8 +294,12 @@ def main():
         resume_from_checkpoints = get_checkpoint(**checkpoint)
         for resume_from_checkpoint in tqdm(resume_from_checkpoints, desc="Evaluation"):
             # load state dict
-            state_dict = torch.load(resume_from_checkpoint / WEIGHTS_NAME)
+            state_dict_path = resume_from_checkpoint / WEIGHTS_NAME
+            if not state_dict_path.exists():
+                continue
+            state_dict = torch.load(state_dict_path)
             trainer.model.load_state_dict(state_dict)
+
             # optionally load trainer state for better logging
             trainer_state = resume_from_checkpoint/"trainer_state.json"
             if trainer_state.is_file():
@@ -308,7 +312,10 @@ def main():
         resume_from_checkpoints = get_checkpoint(**checkpoint)
         for resume_from_checkpoint in tqdm(resume_from_checkpoints, desc="Prediction"):
             # load state dict
-            state_dict = torch.load(resume_from_checkpoint / WEIGHTS_NAME)
+            state_dict_path = resume_from_checkpoint / WEIGHTS_NAME
+            if not state_dict_path.exists():
+                continue
+            state_dict = torch.load(state_dict_path)
             trainer.model.load_state_dict(state_dict)
 
             # run model on evaluation dataset
