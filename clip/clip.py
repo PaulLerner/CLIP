@@ -99,6 +99,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
 
     context_length: int, optional
         Defaults to the size of the pre-trained model (i.e. in state_dict)
+        Not available with jit
 
     **kwargs: additional arguments are passed to build_model
 
@@ -137,6 +138,9 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
         return model, _transform(model.visual.input_resolution)
     elif Class != CLIP:
         raise NotImplementedError(f"Set 'jit=False' for other models than CLIP (got {Class})")
+    elif context_length is not None:
+        warnings.warn(f"Setting context_length={context_length} has no effect with jit, "
+                      f"keeping pre-trained value {model.context_length}")
 
     # patch the device names
     device_holder = torch.jit.trace(lambda: torch.ones([]).to(torch.device(device)), example_inputs=[])
@@ -156,8 +160,8 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     patch_device(model.encode_image)
     patch_device(model.encode_text)
 
-    # patch dtype to float32 on CPU
-    if str(device) == "cpu":
+    # patch dtype to float32 on CPU and wrt fp16
+    if str(device) == "cpu" or not fp16:
         float_holder = torch.jit.trace(lambda: torch.ones([]).float(), example_inputs=[])
         float_input = list(float_holder.graph.findNode("aten::to").inputs())[1]
         float_node = float_input.node()
