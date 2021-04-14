@@ -992,7 +992,7 @@ def convert_weights(model: nn.Module):
     model.apply(_convert_weights_to_fp16)
 
 
-def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context_length=None, **kwargs):
+def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context_length=None, pretrained=True, **kwargs):
     """
 
     Parameters
@@ -1003,6 +1003,9 @@ def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context
     fp16: bool, optional
     context_length: int, optional
         Defaults to the size of the pre-trained model (i.e. in state_dict)
+    pretrained: bool, optional
+        Whether to load weights from pre-trained model (default) or just the config
+        jit always loads pre-trained weights.
     **kwargs: additional arguments are passed to Class
 
     Returns
@@ -1083,10 +1086,12 @@ def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context
 
     if fp16:
         convert_weights(model)
-    loading_output = model.load_state_dict(state_dict, strict=not isinstance(model, CLIPDecoder))
-    if loading_output.unexpected_keys:
-        raise RuntimeError(f"Unexpected keys in state_dict:\n{loading_output.unexpected_keys}")
-    if loading_output.missing_keys:
-        print(f"The following keys were not loaded from state_dict:\n{loading_output.missing_keys}")
+        
+    if pretrained:
+        loading_output = model.load_state_dict(state_dict, strict=not isinstance(model, CLIPDecoder))
+        if loading_output.unexpected_keys:
+            raise RuntimeError(f"Unexpected keys in state_dict:\n{loading_output.unexpected_keys}")
+        if loading_output.missing_keys:
+            print(f"The following keys were not loaded from state_dict:\n{loading_output.missing_keys}")
 
     return model.train(training)

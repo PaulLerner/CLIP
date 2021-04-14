@@ -73,7 +73,7 @@ def available_models() -> List[str]:
 
 
 def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
-         jit=True, training=False, Class=CLIP, fp16=True, context_length=None, **kwargs):
+         jit=True, training=False, Class=CLIP, fp16=True, context_length=None, pretrained=True, **kwargs):
     """Load a CLIP model
 
     Parameters
@@ -100,6 +100,10 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     context_length: int, optional
         Defaults to the size of the pre-trained model (i.e. in state_dict)
         Not available with jit
+
+    pretrained: bool, optional
+        Whether to load weights from pre-trained model (default) or just the config
+        jit always loads pre-trained weights.
 
     **kwargs: additional arguments are passed to build_model
 
@@ -132,7 +136,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     if not jit:
         model = build_model(state_dict or model.state_dict(),
                             training=training, Class=Class, fp16=fp16,
-                            context_length=context_length, **kwargs).to(device)
+                            context_length=context_length, pretrained=pretrained, **kwargs).to(device)
         if str(device) == "cpu":
             model.float()
         return model, _transform(model.visual.input_resolution)
@@ -141,6 +145,8 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     elif context_length is not None:
         warnings.warn(f"Setting context_length={context_length} has no effect with jit, "
                       f"keeping pre-trained value {model.context_length}")
+    elif not pretrained:
+        raise NotImplementedError(f"Set 'jit=False' to train the model from scratch")
 
     # patch the device names
     device_holder = torch.jit.trace(lambda: torch.ones([]).to(torch.device(device)), example_inputs=[])
