@@ -134,9 +134,10 @@ def get_dataset(image_preprocess, subset, images_path, questions_path, annotatio
             if count < gt_threshold:
                 continue
             # validation setting: remove answer from input to avoid bias in evaluation
+            # shouldn't mask question in this case as it causes trouble for de-tokenization
             if eval:
-                inp, _ = tokenize_qa(norm_question, "", context_length=context_length, mask_question=mask_question)
-                _, tgt = tokenize_qa(norm_question, answer, context_length=context_length, mask_question=mask_question)
+                inp, _ = tokenize_qa(norm_question, "", context_length=context_length, mask_question=False)
+                _, tgt = tokenize_qa(norm_question, answer, context_length=context_length, mask_question=False)
             # train setting: leave answer in the input to allow for teacher forcing
             else:
                 inp, tgt = tokenize_qa(norm_question, answer, context_length=context_length, mask_question=mask_question)
