@@ -2,6 +2,7 @@ from collections import OrderedDict
 from typing import Tuple, Union, Optional
 import warnings
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
@@ -744,7 +745,8 @@ class CLIP(BaseCLIP):
         self.ln_final = LayerNorm(transformer_width)
 
         self.text_projection = nn.Parameter(torch.empty(transformer_width, embed_dim))
-        self.logit_scale = nn.Parameter(torch.ones([]))
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
+
         self.initialize_parameters()
 
     def initialize_parameters(self):
@@ -1092,5 +1094,5 @@ def build_model(state_dict: dict, training=False, Class=CLIP, fp16=True, context
 
     if fp16:
         convert_weights(model)
-        
+
     return model.train(training)
