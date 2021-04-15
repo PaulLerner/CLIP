@@ -11,7 +11,7 @@ import collections
 
 import numpy as np
 
-from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPrediction, logging as t_logging
+from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments, EvalPrediction, trainer_callback, logging as t_logging
 from transformers.trainer_callback import TrainerState
 from transformers.file_utils import WEIGHTS_NAME
 import torch
@@ -256,6 +256,11 @@ def instantiate_trainer(config):
     trainer = CLIPTrainer(model=learner, args=training_args, data_collator=collate_batch,
                           train_dataset=train_dataset, eval_dataset=eval_dataset,
                           compute_metrics=compute_metrics)
+    # training callbacks
+    for callback in config.get("callbacks", []):
+        CallbackClass = getattr(trainer_callback, callback.pop("Class"))
+        trainer.add_callback(CallbackClass(**callback))
+
     return trainer, training_args, config
 
 
