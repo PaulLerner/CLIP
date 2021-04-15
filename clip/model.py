@@ -845,6 +845,7 @@ class CLIPDecoder(BaseCLIP):
         self.separator = separator
         self.eos = eos
         self.initialize_parameters()
+        self.distributions = []
 
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))
@@ -939,7 +940,9 @@ class CLIPDecoder(BaseCLIP):
         # predict the next token
         prediction = input_ids
         question = self.linear(question)
-        answer = question[all_items, first_where].argmax(-1)
+        answer = question[all_items, first_where]
+        self.distributions.append(self.log_softmax(answer))
+        answer = answer.argmax(-1)
 
         # did we predict EOS ?
         reached_eos = answer == self.eos
