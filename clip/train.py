@@ -189,6 +189,26 @@ class Learner(nn.Module):
         return self.model.generate(*args, **kwargs)
 
 
+class PreTrainer(Learner):
+    """
+    Pre-trains CLIP using contrastive objective as described in Radford et al. 2021
+
+    criterion should be CrossEntropyLoss as the model outputs raw logits
+    """
+    def forward(self, input_ids, *args, **kwargs):
+        """Forward pass then compute the loss"""
+        logits_per_image, logits_per_text = self.model(input_ids, *args, **kwargs)
+
+        # compute the loss
+        # image_i matches text_i
+        labels = torch.arange(logits_per_text.shape[0], device=logits_per_text.device)
+        loss_per_image = self.criterion(logits_per_image, labels)
+        loss_per_text = self.criterion(logits_per_text, labels)
+        loss = (loss_per_image + loss_per_text)/2
+
+        return loss, (logits_per_image, logits_per_text)
+
+
 class LanguageModel(Learner):
     """Shifts output and target tokens before computing the loss"""
 
