@@ -195,9 +195,13 @@ class PreTrainer(Learner):
 
     criterion should be CrossEntropyLoss as the model outputs raw logits
     """
-    def forward(self, input_ids, *args, **kwargs):
-        """Forward pass then compute the loss"""
-        logits_per_image, logits_per_text = self.model(input_ids, *args, **kwargs)
+    def forward(self, input_ids, image, *args, **kwargs):
+        """
+        Forward pass then compute the loss
+
+        Silently ignores additionnal arguments (allows to use the same Dataset as LanguageModel)
+        """
+        logits_per_image, logits_per_text = self.model(image, input_ids)
 
         # compute the loss
         # image_i matches text_i
